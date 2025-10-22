@@ -12,6 +12,9 @@ categories = ["multimedia::audio"]
 [dependencies]
 thiserror = "2.0"
 
+[build-dependencies]
+cmake = "0.1"
+
 [dev-dependencies]
 
 [features]

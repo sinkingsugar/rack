@@ -11,7 +11,7 @@
 //!
 //! # fn main() -> rack::Result<()> {
 //! // Scan for plugins
-//! let scanner = Scanner::new();
+//! let scanner = Scanner::new()?;
 //! let plugins = scanner.scan()?;
 //!
 //! println!("Found {} plugins", plugins.len());
