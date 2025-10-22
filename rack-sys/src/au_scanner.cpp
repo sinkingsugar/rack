@@ -1,13 +1,14 @@
 #include "rack_au.h"
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
-#include <vector>
-#include <string>
 #include <cstring>
 
 // Internal scanner state
+// Note: AudioComponent handles are transient and obtained via
+// AudioComponentFindNext during each scan. We don't need to store them
+// until we implement plugin loading functionality.
 struct RackAUScanner {
-    std::vector<AudioComponent> components;
+    // Reserved for future use (e.g., caching component handles)
 };
 
 // Helper: Convert CFString to C string
@@ -71,8 +72,6 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
 
     // If plugins is NULL, we're just counting
     bool count_only = (plugins == nullptr);
-
-    scanner->components.clear();
     size_t count = 0;
     
     // Enumerate all AudioUnit components
@@ -90,24 +89,28 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
             continue;
         }
 
-        // If we're just counting, don't need to get details
+        // Get component name - check this for ALL plugins to ensure consistent counts
+        CFStringRef name = nullptr;
+        status = AudioComponentCopyName(comp, &name);
+        if (status != noErr || !name) {
+            // Skip plugins that don't provide a name - these are typically
+            // malformed or system components we can't use anyway
+            // IMPORTANT: This check happens for BOTH counting and filling passes
+            // to ensure the count matches the number of filled plugins
+            continue;
+        }
+
+        // If we're just counting, don't need to extract details
         if (count_only) {
+            CFRelease(name);
             count++;
             continue;
         }
 
         // If array is full, continue counting but don't fill
         if (count >= max_plugins) {
+            CFRelease(name);
             count++;
-            continue;
-        }
-
-        // Get component name
-        CFStringRef name = nullptr;
-        status = AudioComponentCopyName(comp, &name);
-        if (status != noErr || !name) {
-            // Skip plugins that don't provide a name - these are typically
-            // malformed or system components we can't use anyway
             continue;
         }
 
@@ -158,10 +161,7 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         
         // Type
         info.plugin_type = AudioUnitTypeToPluginType(foundDesc.componentType);
-        
-        // Store component for later loading
-        scanner->components.push_back(comp);
-        
+
         count++;
     }
     

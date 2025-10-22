@@ -33,7 +33,13 @@ int main() {
 
     // Second pass: Allocate and fill
     std::cout << "Fetching plugin details...\n\n";
-    RackAUPluginInfo* plugins = new RackAUPluginInfo[count];
+    RackAUPluginInfo* plugins = new(std::nothrow) RackAUPluginInfo[count];
+    if (!plugins) {
+        std::cerr << "Failed to allocate memory for " << count << " plugins\n";
+        rack_au_scanner_free(scanner);
+        return 1;
+    }
+
     int filled = rack_au_scanner_scan(scanner, plugins, count);
 
     if (filled < 0) {
