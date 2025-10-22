@@ -7,6 +7,22 @@ use std::ptr::NonNull;
 use super::ffi;
 use super::instance::AudioUnitPlugin;
 
+/// Convert C API error code to Rust Error
+///
+/// The C API returns negative error codes:
+/// - RACK_AU_ERROR_* codes (-1 to -4): rack-specific errors
+/// - AudioUnit OSStatus codes (< -1000): Apple AudioUnit errors
+fn map_error(code: i32) -> Error {
+    match code {
+        ffi::RACK_AU_ERROR_GENERIC => Error::Other("Generic AudioUnit scanner error".to_string()),
+        ffi::RACK_AU_ERROR_NOT_FOUND => Error::PluginNotFound("AudioUnit not found".to_string()),
+        ffi::RACK_AU_ERROR_INVALID_PARAM => Error::Other("Invalid parameter".to_string()),
+        ffi::RACK_AU_ERROR_NOT_INITIALIZED => Error::NotInitialized,
+        // AudioUnit OSStatus errors (< -1000) or unknown negative codes
+        _ => Error::from_os_status(code),
+    }
+}
+
 /// Scanner for AudioUnit plugins on macOS
 pub struct AudioUnitScanner {
     inner: NonNull<ffi::RackAUScanner>,
@@ -37,7 +53,7 @@ impl AudioUnitScanner {
             let count = ffi::rack_au_scanner_scan(self.inner.as_ptr(), std::ptr::null_mut(), 0);
 
             if count < 0 {
-                return Err(Error::from_os_status(count));
+                return Err(map_error(count));
             }
 
             if count == 0 {
@@ -62,7 +78,7 @@ impl AudioUnitScanner {
             );
 
             if actual_count < 0 {
-                return Err(Error::from_os_status(actual_count));
+                return Err(map_error(actual_count));
             }
 
             // Handle race condition: plugin list may have changed between passes
@@ -216,9 +232,25 @@ mod tests {
         let result1 = scanner.scan().expect("First scan should succeed");
         let result2 = scanner.scan().expect("Second scan should succeed");
 
-        // Results should be consistent (though plugin count might vary slightly)
-        // We just verify both scans succeed without errors
-        assert!(!result1.is_empty() || result2.is_empty(), "Scans should be stable");
+        // Results should be consistent - both scans should return similar plugin counts
+        // On macOS there are always system AudioUnits, so neither should be empty
+        // Allow small variance (within 10%) in case plugins are being installed/removed
+        let count1 = result1.len();
+        let count2 = result2.len();
+
+        assert!(count1 > 0, "First scan should find plugins");
+        assert!(count2 > 0, "Second scan should find plugins");
+
+        // Check that counts are reasonably similar (within 20% to be safe)
+        let max_count = count1.max(count2);
+        let min_count = count1.min(count2);
+        let variance = (max_count - min_count) as f64 / max_count as f64;
+
+        assert!(
+            variance < 0.2,
+            "Scans should be stable: found {} then {} plugins ({}% variance)",
+            count1, count2, variance * 100.0
+        );
     }
 
     #[test]
