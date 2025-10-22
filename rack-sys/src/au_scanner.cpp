@@ -93,19 +93,27 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         CFStringToCString(name, info.name, sizeof(info.name));
         CFRelease(name);
         
-        // Manufacturer (try to get from component info)
-        CFStringRef mfgName = nullptr;
-        AudioComponentCopyShortName(comp, &mfgName);
-        if (mfgName) {
-            CFStringToCString(mfgName, info.manufacturer, sizeof(info.manufacturer));
-            CFRelease(mfgName);
+        // Manufacturer (convert OSType to string)
+        OSType mfg = foundDesc.componentManufacturer;
+        if (mfg == kAudioUnitManufacturer_Apple) {
+            snprintf(info.manufacturer, sizeof(info.manufacturer), "Apple");
         } else {
-            snprintf(info.manufacturer, sizeof(info.manufacturer), "Unknown");
+            // Convert FourCC to readable string
+            char mfgStr[5] = {0};
+            mfgStr[0] = (mfg >> 24) & 0xFF;
+            mfgStr[1] = (mfg >> 16) & 0xFF;
+            mfgStr[2] = (mfg >> 8) & 0xFF;
+            mfgStr[3] = mfg & 0xFF;
+            snprintf(info.manufacturer, sizeof(info.manufacturer), "%s", mfgStr);
         }
-        
+
+        // Path (AudioUnits are system-registered, path not easily accessible)
+        // We use a placeholder - the unique_id is what matters for loading
+        snprintf(info.path, sizeof(info.path), "<system>");
+
         // Unique ID
         CreateUniqueID(foundDesc, info.unique_id, sizeof(info.unique_id));
-        
+
         // Version
         info.version = foundDesc.componentFlagsMask;
         

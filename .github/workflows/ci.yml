@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-macos:
+    name: Test on macOS
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Install CMake
+      run: brew install cmake
+
+    - name: Build C++ with CMake
+      run: |
+        cd rack-sys
+        mkdir -p build
+        cd build
+        cmake -DBUILD_TESTS=ON ..
+        make
+
+    - name: Run C++ tests
+      run: |
+        cd rack-sys/build
+        ./rack_sys_test
+
+    - name: Build Rust library
+      run: cargo build --verbose
+
+    - name: Run Rust tests
+      run: cargo test --verbose
+
+    - name: Build examples
+      run: |
+        cargo build --example list_plugins --verbose
+
+    - name: Run list_plugins example
+      run: |
+        cargo run --example list_plugins

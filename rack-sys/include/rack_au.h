@@ -25,6 +25,7 @@ typedef enum {
 typedef struct {
     char name[256];
     char manufacturer[256];
+    char path[1024];
     char unique_id[64];
     uint32_t version;
     RackAUPluginType plugin_type;
