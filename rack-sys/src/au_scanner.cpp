@@ -1,6 +1,7 @@
 #include "rack_au.h"
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <new>
 #include <cstring>
 
 // Internal scanner state
@@ -58,7 +59,7 @@ static void CreateUniqueID(const AudioComponentDescription& desc, char* buffer, 
 // ============================================================================
 
 RackAUScanner* rack_au_scanner_new(void) {
-    return new RackAUScanner();
+    return new(std::nothrow) RackAUScanner();
 }
 
 void rack_au_scanner_free(RackAUScanner* scanner) {

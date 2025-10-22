@@ -34,7 +34,7 @@ jobs:
         output=$(./rack_sys_test)
         echo "$output"
         # Verify that plugins were actually found
-        if ! echo "$output" | grep -q "Found [1-9][0-9]* plugin"; then
+        if ! echo "$output" | grep -qE "Found [1-9][0-9]* plugin\(s\)"; then
           echo "ERROR: No plugins found or test failed"
           exit 1
         fi

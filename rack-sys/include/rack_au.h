@@ -44,6 +44,7 @@ typedef struct {
 // ============================================================================
 
 // Create a new scanner
+// Returns NULL if allocation fails
 RackAUScanner* rack_au_scanner_new(void);
 
 // Free scanner
