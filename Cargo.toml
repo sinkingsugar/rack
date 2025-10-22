@@ -1,0 +1,29 @@
+[package]
+name = "rack"
+version = "0.1.1"
+edition = "2021"
+authors = ["Giovanni <giovanni@fragcolor.com>"]
+license = "MIT OR Apache-2.0"
+description = "A modern Rust library for hosting audio plugins"
+repository = "https://github.com/fragcolor-xyz/rack"
+keywords = ["audio", "plugin", "vst", "audiounit", "host"]
+categories = ["multimedia::audio"]
+
+[dependencies]
+thiserror = "2.0"
+
+[dev-dependencies]
+
+[features]
+default = []
+
+[[example]]
+name = "list_plugins"
+path = "examples/list_plugins.rs"
+
+[profile.dev]
+opt-level = 2  # Audio needs some optimization even in debug
+
+[profile.release]
+lto = true
+codegen-units = 1
