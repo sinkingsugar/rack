@@ -51,8 +51,10 @@ void rack_au_scanner_free(RackAUScanner* scanner);
 
 // Scan for plugins
 // Returns number of plugins found, or negative error code
-// plugins: output array (allocated by caller)
-// max_plugins: size of output array
+// If plugins is NULL, only returns the count (pass 0 for max_plugins)
+// If plugins is not NULL, fills the array up to max_plugins
+// plugins: output array (allocated by caller), or NULL to get count only
+// max_plugins: size of output array (ignored if plugins is NULL)
 int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size_t max_plugins);
 
 // ============================================================================

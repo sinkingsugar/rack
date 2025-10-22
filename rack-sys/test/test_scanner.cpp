@@ -13,24 +13,40 @@ int main() {
         return 1;
     }
 
-    // Prepare buffer for results
-    const size_t MAX_PLUGINS = 256;
-    RackAUPluginInfo plugins[MAX_PLUGINS];
-
-    // Scan for plugins
-    std::cout << "Scanning for AudioUnit plugins...\n\n";
-    int count = rack_au_scanner_scan(scanner, plugins, MAX_PLUGINS);
+    // First pass: Get the count
+    std::cout << "Counting AudioUnit plugins...\n";
+    int count = rack_au_scanner_scan(scanner, nullptr, 0);
 
     if (count < 0) {
-        std::cerr << "Error scanning: " << count << "\n";
+        std::cerr << "Error counting plugins: " << count << "\n";
         rack_au_scanner_free(scanner);
         return 1;
     }
 
-    std::cout << "Found " << count << " plugin(s):\n\n";
+    std::cout << "Found " << count << " plugin(s)\n\n";
+
+    if (count == 0) {
+        std::cout << "No plugins found!\n";
+        rack_au_scanner_free(scanner);
+        return 0;
+    }
+
+    // Second pass: Allocate and fill
+    std::cout << "Fetching plugin details...\n\n";
+    RackAUPluginInfo* plugins = new RackAUPluginInfo[count];
+    int filled = rack_au_scanner_scan(scanner, plugins, count);
+
+    if (filled < 0) {
+        std::cerr << "Error scanning plugins: " << filled << "\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return 1;
+    }
+
+    std::cout << "Retrieved " << filled << " plugin(s):\n\n";
 
     // Print results
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < filled; i++) {
         const RackAUPluginInfo& info = plugins[i];
 
         std::cout << (i + 1) << ". " << info.name << "\n";
@@ -63,6 +79,7 @@ int main() {
     }
 
     // Cleanup
+    delete[] plugins;
     rack_au_scanner_free(scanner);
 
     std::cout << "Test completed successfully!\n";

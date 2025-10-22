@@ -57,10 +57,13 @@ void rack_au_scanner_free(RackAUScanner* scanner) {
 }
 
 int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size_t max_plugins) {
-    if (!scanner || !plugins || max_plugins == 0) {
+    if (!scanner) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
-    
+
+    // If plugins is NULL, we're just counting
+    bool count_only = (plugins == nullptr);
+
     scanner->components.clear();
     size_t count = 0;
     
@@ -71,21 +74,33 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
     desc.componentManufacturer = 0;
     
     AudioComponent comp = nullptr;
-    while ((comp = AudioComponentFindNext(comp, &desc)) != nullptr && count < max_plugins) {
+    while ((comp = AudioComponentFindNext(comp, &desc)) != nullptr) {
+        // If we're filling an array and it's full, stop
+        if (!count_only && count >= max_plugins) {
+            break;
+        }
+
         // Get component description
         AudioComponentDescription foundDesc;
         OSStatus status = AudioComponentGetDescription(comp, &foundDesc);
         if (status != noErr) {
             continue;
         }
-        
+
+        // If we're just counting, don't need to get details
+        if (count_only) {
+            scanner->components.push_back(comp);
+            count++;
+            continue;
+        }
+
         // Get component name
         CFStringRef name = nullptr;
         status = AudioComponentCopyName(comp, &name);
         if (status != noErr || !name) {
             continue;
         }
-        
+
         // Fill in plugin info
         RackAUPluginInfo& info = plugins[count];
         
