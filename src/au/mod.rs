@@ -1,3 +1,4 @@
+mod ffi;
 mod scanner;
 mod instance;
 
