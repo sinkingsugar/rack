@@ -20,9 +20,6 @@ jobs:
       with:
         toolchain: stable
 
-    - name: Install CMake
-      run: brew install cmake
-
     - name: Build C++ with CMake
       run: |
         cd rack-sys
@@ -34,7 +31,14 @@ jobs:
     - name: Run C++ tests
       run: |
         cd rack-sys/build
-        ./rack_sys_test
+        output=$(./rack_sys_test)
+        echo "$output"
+        # Verify that plugins were actually found
+        if ! echo "$output" | grep -q "Found [1-9][0-9]* plugin"; then
+          echo "ERROR: No plugins found or test failed"
+          exit 1
+        fi
+        echo "✓ Test passed and plugins were discovered"
 
     - name: Build Rust library
       run: cargo build --verbose
@@ -48,4 +52,11 @@ jobs:
 
     - name: Run list_plugins example
       run: |
-        cargo run --example list_plugins
+        output=$(cargo run --example list_plugins 2>&1)
+        echo "$output"
+        # Verify that the example ran successfully
+        if [ $? -ne 0 ]; then
+          echo "ERROR: list_plugins example failed"
+          exit 1
+        fi
+        echo "✓ list_plugins example completed successfully"

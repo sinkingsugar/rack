@@ -75,11 +75,6 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
     
     AudioComponent comp = nullptr;
     while ((comp = AudioComponentFindNext(comp, &desc)) != nullptr) {
-        // If we're filling an array and it's full, stop
-        if (!count_only && count >= max_plugins) {
-            break;
-        }
-
         // Get component description
         AudioComponentDescription foundDesc;
         OSStatus status = AudioComponentGetDescription(comp, &foundDesc);
@@ -90,6 +85,12 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         // If we're just counting, don't need to get details
         if (count_only) {
             scanner->components.push_back(comp);
+            count++;
+            continue;
+        }
+
+        // If array is full, continue counting but don't fill
+        if (count >= max_plugins) {
             count++;
             continue;
         }
@@ -105,7 +106,9 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         RackAUPluginInfo& info = plugins[count];
         
         // Name
-        CFStringToCString(name, info.name, sizeof(info.name));
+        if (!CFStringToCString(name, info.name, sizeof(info.name))) {
+            snprintf(info.name, sizeof(info.name), "<unknown>");
+        }
         CFRelease(name);
         
         // Manufacturer (convert OSType to string)
@@ -136,7 +139,7 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         CreateUniqueID(foundDesc, info.unique_id, sizeof(info.unique_id));
 
         // Version
-        info.version = foundDesc.componentFlagsMask;
+        info.version = foundDesc.componentFlags;
         
         // Type
         info.plugin_type = AudioUnitTypeToPluginType(foundDesc.componentType);
