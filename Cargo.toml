@@ -24,6 +24,10 @@ default = []
 name = "list_plugins"
 path = "examples/list_plugins.rs"
 
+[[example]]
+name = "load_plugin"
+path = "examples/load_plugin.rs"
+
 [profile.dev]
 opt-level = 2  # Audio needs some optimization even in debug
 
