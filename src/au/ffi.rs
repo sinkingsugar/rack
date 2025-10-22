@@ -3,6 +3,8 @@
 //! This module contains unsafe FFI declarations. All safe wrappers
 //! should be in scanner.rs and instance.rs.
 
+#![allow(dead_code)]
+
 use std::os::raw::{c_char, c_int};
 
 // Opaque types (zero-sized to prevent construction)
