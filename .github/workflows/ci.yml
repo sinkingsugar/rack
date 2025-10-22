@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-macos:
+    name: Test on macOS
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Build C++ with CMake
+      run: |
+        cd rack-sys
+        mkdir -p build
+        cd build
+        cmake -DBUILD_TESTS=ON ..
+        make
+
+    - name: Run C++ tests
+      run: |
+        cd rack-sys/build
+        output=$(./rack_sys_test)
+        echo "$output"
+        # Verify that plugins were actually found
+        if ! echo "$output" | grep -qE "Found [1-9][0-9]* plugin\(s\)"; then
+          echo "ERROR: No plugins found or test failed"
+          exit 1
+        fi
+        echo "✓ Test passed and plugins were discovered"
+
+    - name: Build Rust library
+      run: cargo build --verbose
+
+    - name: Run Rust tests
+      run: cargo test --verbose
+
+    - name: Build examples
+      run: |
+        cargo build --example list_plugins --verbose
+
+    - name: Run list_plugins example
+      run: |
+        output=$(cargo run --example list_plugins 2>&1)
+        exit_code=$?
+        echo "$output"
+        # Verify that the example ran successfully
+        if [ $exit_code -ne 0 ]; then
+          echo "ERROR: list_plugins example failed"
+          exit 1
+        fi
+        echo "✓ list_plugins example completed successfully"

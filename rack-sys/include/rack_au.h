@@ -25,6 +25,7 @@ typedef enum {
 typedef struct {
     char name[256];
     char manufacturer[256];
+    char path[1024];
     char unique_id[64];
     uint32_t version;
     RackAUPluginType plugin_type;
@@ -43,15 +44,27 @@ typedef struct {
 // ============================================================================
 
 // Create a new scanner
+// Returns NULL if allocation fails
 RackAUScanner* rack_au_scanner_new(void);
 
 // Free scanner
 void rack_au_scanner_free(RackAUScanner* scanner);
 
 // Scan for plugins
-// Returns number of plugins found, or negative error code
-// plugins: output array (allocated by caller)
-// max_plugins: size of output array
+// Returns number of plugins found (or would be found), or negative error code
+//
+// Two-pass usage pattern (recommended):
+//   1. count = rack_au_scanner_scan(scanner, NULL, 0);  // Get total count
+//   2. rack_au_scanner_scan(scanner, array, count);     // Fill array
+//
+// If plugins is NULL: Only counts plugins, does not extract details
+// If plugins is not NULL: Fills array up to max_plugins
+//
+// IMPORTANT: Return value may exceed max_plugins if more plugins exist.
+//            Compare return value with max_plugins to detect truncation.
+//
+// plugins: output array (allocated by caller), or NULL to get count only
+// max_plugins: size of output array (ignored if plugins is NULL)
 int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size_t max_plugins);
 
 // ============================================================================
