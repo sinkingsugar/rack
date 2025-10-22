@@ -31,14 +31,27 @@ jobs:
     - name: Run C++ tests
       run: |
         cd rack-sys/build
-        output=$(./rack_sys_test)
-        echo "$output"
+
+        echo "Running scanner tests..."
+        scanner_output=$(./rack_sys_test_scanner)
+        echo "$scanner_output"
         # Verify that plugins were actually found
-        if ! echo "$output" | grep -qE "Found [1-9][0-9]* plugin\(s\)"; then
-          echo "ERROR: No plugins found or test failed"
+        if ! echo "$scanner_output" | grep -qE "Found [1-9][0-9]* plugin\(s\)"; then
+          echo "ERROR: No plugins found or scanner test failed"
           exit 1
         fi
-        echo "✓ Test passed and plugins were discovered"
+        echo "✓ Scanner test passed and plugins were discovered"
+
+        echo ""
+        echo "Running instance tests..."
+        instance_output=$(./rack_sys_test_instance)
+        echo "$instance_output"
+        # Verify that all tests completed
+        if ! echo "$instance_output" | grep -q "All tests completed!"; then
+          echo "ERROR: Instance test failed"
+          exit 1
+        fi
+        echo "✓ Instance test passed"
 
     - name: Build Rust library
       run: cargo build --verbose
@@ -49,6 +62,7 @@ jobs:
     - name: Build examples
       run: |
         cargo build --example list_plugins --verbose
+        cargo build --example load_plugin --verbose
 
     - name: Run list_plugins example
       run: |
@@ -61,3 +75,19 @@ jobs:
           exit 1
         fi
         echo "✓ list_plugins example completed successfully"
+
+    - name: Run load_plugin example
+      run: |
+        output=$(cargo run --example load_plugin 2>&1)
+        exit_code=$?
+        echo "$output"
+        # Verify that the example ran successfully and initialized a plugin
+        if [ $exit_code -ne 0 ]; then
+          echo "ERROR: load_plugin example failed"
+          exit 1
+        fi
+        if ! echo "$output" | grep -q "Plugin initialized successfully"; then
+          echo "ERROR: Plugin was not initialized successfully"
+          exit 1
+        fi
+        echo "✓ load_plugin example completed successfully"
