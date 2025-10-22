@@ -1,5 +1,6 @@
 use crate::{Error, PluginInfo, PluginScanner, PluginType, Result};
 use std::ffi::CStr;
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::ptr::NonNull;
@@ -24,9 +25,29 @@ fn map_error(code: i32) -> Error {
 }
 
 /// Scanner for AudioUnit plugins on macOS
+///
+/// # Thread Safety
+///
+/// This type is `Send` but not `Sync`:
+/// - `Send`: The scanner can be moved between threads safely, as each scanner
+///   owns its own C++ state and the AudioComponent APIs are thread-safe for reading.
+/// - NOT `Sync`: Multiple threads should not access the scanner simultaneously
+///   without synchronization. Wrap in `Arc<Mutex<>>` if shared access is needed.
 pub struct AudioUnitScanner {
     inner: NonNull<ffi::RackAUScanner>,
+    // PhantomData<*const ()> makes this type !Sync while keeping it Send
+    // This prevents concurrent access without Arc<Mutex<>>
+    _not_sync: PhantomData<*const ()>,
 }
+
+// Safety: AudioUnitScanner can be sent between threads because:
+// 1. Each scanner instance owns its C++ state exclusively
+// 2. The AudioComponent scanning APIs are thread-safe for reading system state
+// 3. No shared mutable state exists between scanner instances
+unsafe impl Send for AudioUnitScanner {}
+
+// Note: AudioUnitScanner is NOT Sync due to PhantomData<*const ()>
+// This is intentional - the C++ scanner requires synchronization for shared access
 
 impl AudioUnitScanner {
     /// Create a new AudioUnit scanner
@@ -42,6 +63,7 @@ impl AudioUnitScanner {
             }
             Ok(Self {
                 inner: NonNull::new_unchecked(ptr),
+                _not_sync: PhantomData,
             })
         }
     }
@@ -105,33 +127,42 @@ impl AudioUnitScanner {
     }
 }
 
+/// Safely convert a fixed-size C char array to a Rust String
+///
+/// This uses bounded string conversion to prevent UB even if the C++ code
+/// has a bug and fails to null-terminate within the array bounds.
+///
+/// # Safety
+///
+/// The caller must ensure the array pointer is valid and the size is correct.
+unsafe fn c_array_to_string(arr: &[i8], field_name: &str) -> Result<String> {
+    // Cast to u8 slice for CStr::from_bytes_until_nul
+    let bytes = std::slice::from_raw_parts(arr.as_ptr() as *const u8, arr.len());
+
+    // Find null terminator within bounds (defense against C++ bugs)
+    let cstr = CStr::from_bytes_until_nul(bytes).map_err(|_| {
+        Error::Other(format!(
+            "{} not null-terminated within buffer (potential C++ bug)",
+            field_name
+        ))
+    })?;
+
+    // Convert to UTF-8 string
+    cstr.to_str()
+        .map_err(|e| Error::Other(format!("Invalid UTF-8 in {}: {}", field_name, e)))
+        .map(|s| s.to_string())
+}
+
 /// Convert C plugin info to Rust PluginInfo
 fn convert_plugin_info(c_info: &ffi::RackAUPluginInfo) -> Result<PluginInfo> {
     unsafe {
-        // Safety: The C++ code (au_scanner.cpp) guarantees:
-        // 1. All string buffers are null-terminated
-        // 2. Strings fit within their fixed-size buffers (256/1024/64 bytes)
-        // 3. Buffers contain valid UTF-8 (AudioUnit API uses UTF-8)
-        // The C++ implementation uses strncpy with explicit null-termination
-
-        let name = CStr::from_ptr(c_info.name.as_ptr())
-            .to_str()
-            .map_err(|e| Error::Other(format!("Invalid UTF-8 in plugin name: {}", e)))?
-            .to_string();
-
-        let manufacturer = CStr::from_ptr(c_info.manufacturer.as_ptr())
-            .to_str()
-            .map_err(|e| Error::Other(format!("Invalid UTF-8 in manufacturer: {}", e)))?
-            .to_string();
-
-        let path = CStr::from_ptr(c_info.path.as_ptr())
-            .to_str()
-            .map_err(|e| Error::Other(format!("Invalid UTF-8 in path: {}", e)))?;
-
-        let unique_id = CStr::from_ptr(c_info.unique_id.as_ptr())
-            .to_str()
-            .map_err(|e| Error::Other(format!("Invalid UTF-8 in unique_id: {}", e)))?
-            .to_string();
+        // Use bounded string conversion for safety
+        // This protects against C++ bugs (missing null-termination)
+        // by only searching for null within the fixed array bounds
+        let name = c_array_to_string(&c_info.name, "plugin name")?;
+        let manufacturer = c_array_to_string(&c_info.manufacturer, "manufacturer")?;
+        let path_str = c_array_to_string(&c_info.path, "path")?;
+        let unique_id = c_array_to_string(&c_info.unique_id, "unique_id")?;
 
         // Convert plugin type
         let plugin_type = match c_info.plugin_type {
@@ -147,7 +178,7 @@ fn convert_plugin_info(c_info: &ffi::RackAUPluginInfo) -> Result<PluginInfo> {
             manufacturer,
             c_info.version,
             plugin_type,
-            PathBuf::from(path),
+            PathBuf::from(path_str),
             unique_id,
         ))
     }
