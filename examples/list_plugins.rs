@@ -5,7 +5,7 @@ use rack::prelude::*;
 fn main() -> Result<()> {
     println!("Scanning for AudioUnit plugins...\n");
 
-    let scanner = Scanner::new();
+    let scanner = Scanner::new()?;
     let plugins = scanner.scan()?;
 
     if plugins.is_empty() {

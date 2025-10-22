@@ -55,19 +55,52 @@ extern "C" {
     // ============================================================================
 
     /// Create a new scanner
-    /// Returns NULL if allocation fails
+    ///
+    /// # Returns
+    ///
+    /// Returns a pointer to a new scanner, or NULL if allocation fails
+    ///
+    /// # Safety
+    ///
+    /// - The returned pointer must be freed with `rack_au_scanner_free`
+    /// - The pointer is valid until `rack_au_scanner_free` is called
+    /// - Must not be called from multiple threads without synchronization
     pub fn rack_au_scanner_new() -> *mut RackAUScanner;
 
     /// Free scanner
+    ///
+    /// # Safety
+    ///
+    /// - `scanner` must be a valid pointer returned by `rack_au_scanner_new`
+    /// - `scanner` must not be used after this call
+    /// - Must not be called multiple times with the same pointer
+    /// - If `scanner` is NULL, this function does nothing (safe no-op)
     pub fn rack_au_scanner_free(scanner: *mut RackAUScanner);
 
     /// Scan for plugins
     ///
-    /// Two-pass usage:
-    /// 1. count = rack_au_scanner_scan(scanner, NULL, 0);
-    /// 2. rack_au_scanner_scan(scanner, array, count);
+    /// Two-pass usage pattern:
+    /// 1. `count = rack_au_scanner_scan(scanner, NULL, 0);` - Get plugin count
+    /// 2. `rack_au_scanner_scan(scanner, array, count);` - Fill array with plugin info
     ///
-    /// Returns number of plugins found (or would be found), or negative error code
+    /// # Returns
+    ///
+    /// - On success: number of plugins found (may exceed max_plugins if more exist)
+    /// - On error: negative error code (see RACK_AU_ERROR_* constants)
+    ///
+    /// # Safety
+    ///
+    /// - `scanner` must be a valid pointer returned by `rack_au_scanner_new`
+    /// - If `plugins` is NULL, `max_plugins` is ignored (count-only mode)
+    /// - If `plugins` is not NULL:
+    ///   - Must point to an array with at least `max_plugins` elements
+    ///   - Array must be valid for writes
+    ///   - The first min(return_value, max_plugins) elements will be initialized
+    /// - C++ code guarantees:
+    ///   - All string fields are null-terminated
+    ///   - Strings fit within their buffer sizes
+    ///   - No buffer overflows occur
+    /// - Thread-safety: Scanner can be used from multiple threads with proper synchronization
     pub fn rack_au_scanner_scan(
         scanner: *mut RackAUScanner,
         plugins: *mut RackAUPluginInfo,
@@ -79,13 +112,38 @@ extern "C" {
     // ============================================================================
 
     /// Create a new plugin instance from unique_id
+    ///
+    /// # Safety
+    ///
+    /// - `unique_id` must be a valid null-terminated C string
+    /// - `unique_id` must remain valid for the duration of the call
+    /// - Returns NULL if plugin not found or allocation fails
+    /// - Returned pointer must be freed with `rack_au_plugin_free`
     pub fn rack_au_plugin_new(unique_id: *const c_char) -> *mut RackAUPlugin;
 
     /// Free plugin instance
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `plugin` must not be used after this call
+    /// - Must not be called multiple times with the same pointer
+    /// - If `plugin` is NULL, this function does nothing (safe no-op)
     pub fn rack_au_plugin_free(plugin: *mut RackAUPlugin);
 
-    /// Initialize plugin
-    /// Returns 0 on success, negative error code on failure
+    /// Initialize plugin with sample rate and buffer size
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `sample_rate` must be positive and reasonable (e.g., 44100-192000)
+    /// - `max_block_size` must be positive and reasonable (e.g., 64-8192)
+    /// - Must be called before `rack_au_plugin_process`
     pub fn rack_au_plugin_initialize(
         plugin: *mut RackAUPlugin,
         sample_rate: f64,
@@ -93,12 +151,33 @@ extern "C" {
     ) -> c_int;
 
     /// Check if plugin is initialized
+    ///
+    /// # Returns
+    ///
+    /// - 1 if initialized
+    /// - 0 if not initialized
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     pub fn rack_au_plugin_is_initialized(plugin: *mut RackAUPlugin) -> c_int;
 
-    /// Process audio
-    /// input/output: interleaved stereo buffers
-    /// frames: number of frames to process
-    /// Returns 0 on success, negative error code on failure
+    /// Process audio through the plugin
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer and initialized
+    /// - `input` must point to a buffer with at least `frames * 2` f32 values (stereo interleaved)
+    /// - `output` must point to a buffer with space for at least `frames * 2` f32 values (stereo interleaved)
+    /// - `frames` must not exceed the `max_block_size` from initialization
+    /// - Buffers must not overlap unless input == output (in-place processing)
+    /// - Must not be called concurrently on the same plugin from multiple threads
     pub fn rack_au_plugin_process(
         plugin: *mut RackAUPlugin,
         input: *const f32,
@@ -107,10 +186,29 @@ extern "C" {
     ) -> c_int;
 
     /// Get parameter count
+    ///
+    /// # Returns
+    ///
+    /// - Parameter count (>= 0) on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     pub fn rack_au_plugin_parameter_count(plugin: *mut RackAUPlugin) -> c_int;
 
     /// Get parameter value (normalized 0.0 to 1.0)
-    /// Returns 0 on success, negative error code on failure
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success (value written to `value` pointer)
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `index` must be less than parameter count
+    /// - `value` must be a valid pointer to an f32
     pub fn rack_au_plugin_get_parameter(
         plugin: *mut RackAUPlugin,
         index: u32,
@@ -118,15 +216,38 @@ extern "C" {
     ) -> c_int;
 
     /// Set parameter value (normalized 0.0 to 1.0)
-    /// Returns 0 on success, negative error code on failure
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `index` must be less than parameter count
+    /// - `value` should be in range 0.0-1.0 (values outside may be clamped)
     pub fn rack_au_plugin_set_parameter(
         plugin: *mut RackAUPlugin,
         index: u32,
         value: f32,
     ) -> c_int;
 
-    /// Get parameter info
-    /// Returns 0 on success, negative error code on failure
+    /// Get parameter info (name, min, max, default)
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success (values written to output pointers)
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `index` must be less than parameter count
+    /// - `name` must point to a buffer with at least `name_size` bytes
+    /// - `min`, `max`, `default_value` must be valid pointers to f32
+    /// - `name` will be null-terminated
+    /// - `name_size` should be at least 256 bytes for typical parameter names
     pub fn rack_au_plugin_parameter_info(
         plugin: *mut RackAUPlugin,
         index: u32,
