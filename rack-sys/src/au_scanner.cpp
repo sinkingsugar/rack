@@ -37,7 +37,15 @@ static RackAUPluginType AudioUnitTypeToPluginType(OSType type) {
 }
 
 // Helper: Create unique ID string from AudioComponentDescription
+// Format: "XXXXXXXX-XXXXXXXX-XXXXXXXX" (26 chars + null = 27 bytes minimum)
 static void CreateUniqueID(const AudioComponentDescription& desc, char* buffer, size_t buffer_size) {
+    if (buffer_size < 27) {
+        // Buffer too small, use truncated format
+        if (buffer_size > 0) {
+            buffer[0] = '\0';
+        }
+        return;
+    }
     snprintf(buffer, buffer_size, "%08X-%08X-%08X",
              (unsigned int)desc.componentType,
              (unsigned int)desc.componentSubType,
@@ -84,7 +92,6 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
 
         // If we're just counting, don't need to get details
         if (count_only) {
-            scanner->components.push_back(comp);
             count++;
             continue;
         }
@@ -99,13 +106,16 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         CFStringRef name = nullptr;
         status = AudioComponentCopyName(comp, &name);
         if (status != noErr || !name) {
+            // Skip plugins that don't provide a name - these are typically
+            // malformed or system components we can't use anyway
             continue;
         }
 
         // Fill in plugin info
         RackAUPluginInfo& info = plugins[count];
-        
-        // Name
+
+        // Name (clear buffer first to ensure null termination)
+        info.name[0] = '\0';
         if (!CFStringToCString(name, info.name, sizeof(info.name))) {
             snprintf(info.name, sizeof(info.name), "<unknown>");
         }
@@ -139,7 +149,12 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         CreateUniqueID(foundDesc, info.unique_id, sizeof(info.unique_id));
 
         // Version
-        info.version = foundDesc.componentFlags;
+        UInt32 version = 0;
+        if (AudioComponentGetVersion(comp, &version) == noErr) {
+            info.version = version;
+        } else {
+            info.version = 0;
+        }
         
         // Type
         info.plugin_type = AudioUnitTypeToPluginType(foundDesc.componentType);
