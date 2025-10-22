@@ -98,12 +98,18 @@ int rack_au_scanner_scan(RackAUScanner* scanner, RackAUPluginInfo* plugins, size
         if (mfg == kAudioUnitManufacturer_Apple) {
             snprintf(info.manufacturer, sizeof(info.manufacturer), "Apple");
         } else {
-            // Convert FourCC to readable string
+            // Convert FourCC to readable string with validation
             char mfgStr[5] = {0};
-            mfgStr[0] = (mfg >> 24) & 0xFF;
-            mfgStr[1] = (mfg >> 16) & 0xFF;
-            mfgStr[2] = (mfg >> 8) & 0xFF;
-            mfgStr[3] = mfg & 0xFF;
+            unsigned char bytes[4] = {
+                static_cast<unsigned char>((mfg >> 24) & 0xFF),
+                static_cast<unsigned char>((mfg >> 16) & 0xFF),
+                static_cast<unsigned char>((mfg >> 8) & 0xFF),
+                static_cast<unsigned char>(mfg & 0xFF)
+            };
+            for (int i = 0; i < 4; ++i) {
+                // Printable ASCII range: 0x20 (space) to 0x7E (~)
+                mfgStr[i] = (bytes[i] >= 0x20 && bytes[i] <= 0x7E) ? bytes[i] : '?';
+            }
             snprintf(info.manufacturer, sizeof(info.manufacturer), "%s", mfgStr);
         }
 
