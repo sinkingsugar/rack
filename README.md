@@ -9,7 +9,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/rack.svg)](https://crates.io/crates/rack)
 [![Documentation](https://docs.rs/rack/badge.svg)](https://docs.rs/rack)
-[![License](https://img.shields.io/crates/l/rack.svg)](https://github.com/fragcolor-xyz/rack#license)
+[![License](https://img.shields.io/crates/l/rack.svg)](https://github.com/sinkingsugar/rack#license)
 
 Rack is a cross-platform library for discovering, loading, and processing audio through VST3, AudioUnit, CLAP, and other plugin formats in Rust applications.
 

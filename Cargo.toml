@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Giovanni <giovanni@fragcolor.com>"]
 license = "MIT OR Apache-2.0"
 description = "A modern Rust library for hosting audio plugins"
-repository = "https://github.com/fragcolor-xyz/rack"
+repository = "https://github.com/sinkingsugar/rack"
 keywords = ["audio", "plugin", "vst", "audiounit", "host"]
 categories = ["multimedia::audio"]
 
