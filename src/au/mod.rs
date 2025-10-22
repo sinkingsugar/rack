@@ -1,4 +1,5 @@
 mod ffi;
+mod util;
 mod scanner;
 mod instance;
 
