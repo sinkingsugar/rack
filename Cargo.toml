@@ -28,6 +28,10 @@ path = "examples/list_plugins.rs"
 name = "load_plugin"
 path = "examples/load_plugin.rs"
 
+[[example]]
+name = "process_audio"
+path = "examples/process_audio.rs"
+
 [profile.dev]
 opt-level = 2  # Audio needs some optimization even in debug
 

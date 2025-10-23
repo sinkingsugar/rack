@@ -11,11 +11,48 @@ struct RackAUPlugin {
     double sample_rate;
     uint32_t max_block_size;
     char unique_id[64];
+
+    // Audio buffers for processing
+    AudioBufferList* input_buffer_list;
+    AudioBufferList* output_buffer_list;
+    const float* current_input;  // Pointer to current input for render callback
 };
 
 // ============================================================================
 // Plugin Instance Implementation
 // ============================================================================
+
+// Render callback: provides input audio to the AudioUnit
+static OSStatus input_render_callback(
+    void* inRefCon,
+    AudioUnitRenderActionFlags* ioActionFlags,
+    const AudioTimeStamp* inTimeStamp,
+    UInt32 inBusNumber,
+    UInt32 inNumberFrames,
+    AudioBufferList* ioData
+) {
+    RackAUPlugin* plugin = static_cast<RackAUPlugin*>(inRefCon);
+
+    if (!plugin || !plugin->current_input || !ioData) {
+        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+        return noErr;
+    }
+
+    // Copy interleaved input to non-interleaved AudioBufferList
+    // Assuming stereo (2 channels)
+    if (ioData->mNumberBuffers >= 2) {
+        float* left_out = static_cast<float*>(ioData->mBuffers[0].mData);
+        float* right_out = static_cast<float*>(ioData->mBuffers[1].mData);
+        const float* interleaved = plugin->current_input;
+
+        for (UInt32 i = 0; i < inNumberFrames; i++) {
+            left_out[i] = interleaved[i * 2];
+            right_out[i] = interleaved[i * 2 + 1];
+        }
+    }
+
+    return noErr;
+}
 
 // Parse unique_id format: "type-subtype-manufacturer" (all hex)
 // Example: "61756678-64796e78-4170706c" (aufx-dynx-Appl)
@@ -50,6 +87,9 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     plugin->initialized = false;
     plugin->sample_rate = 0.0;
     plugin->max_block_size = 0;
+    plugin->input_buffer_list = nullptr;
+    plugin->output_buffer_list = nullptr;
+    plugin->current_input = nullptr;
     strncpy(plugin->unique_id, unique_id, sizeof(plugin->unique_id) - 1);
     plugin->unique_id[sizeof(plugin->unique_id) - 1] = '\0';
 
@@ -81,12 +121,27 @@ void rack_au_plugin_free(RackAUPlugin* plugin) {
     if (!plugin) {
         return;
     }
-    
+
     if (plugin->audio_unit) {
         AudioUnitUninitialize(plugin->audio_unit);
         AudioComponentInstanceDispose(plugin->audio_unit);
     }
-    
+
+    // Free audio buffers
+    if (plugin->input_buffer_list) {
+        if (plugin->input_buffer_list->mNumberBuffers > 0 && plugin->input_buffer_list->mBuffers[0].mData) {
+            free(plugin->input_buffer_list->mBuffers[0].mData);
+        }
+        free(plugin->input_buffer_list);
+    }
+
+    if (plugin->output_buffer_list) {
+        if (plugin->output_buffer_list->mNumberBuffers > 0 && plugin->output_buffer_list->mBuffers[0].mData) {
+            free(plugin->output_buffer_list->mBuffers[0].mData);
+        }
+        free(plugin->output_buffer_list);
+    }
+
     delete plugin;
 }
 
@@ -161,9 +216,64 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         // MaximumFramesPerSlice might not be supported by all plugins, continue anyway
     }
 
+    // Allocate audio buffers for non-interleaved format (2 channels)
+    // Input buffer (for providing audio to effect plugins)
+    size_t buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * 2);
+    plugin->input_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
+    plugin->input_buffer_list->mNumberBuffers = 2;
+
+    size_t buffer_size = max_block_size * sizeof(float);
+    for (UInt32 i = 0; i < 2; i++) {
+        plugin->input_buffer_list->mBuffers[i].mNumberChannels = 1;
+        plugin->input_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
+        plugin->input_buffer_list->mBuffers[i].mData = malloc(buffer_size);
+    }
+
+    // Output buffer (for receiving audio from the plugin)
+    plugin->output_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
+    plugin->output_buffer_list->mNumberBuffers = 2;
+
+    for (UInt32 i = 0; i < 2; i++) {
+        plugin->output_buffer_list->mBuffers[i].mNumberChannels = 1;
+        plugin->output_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
+        plugin->output_buffer_list->mBuffers[i].mData = malloc(buffer_size);
+    }
+
+    // Set up input render callback (for effect plugins)
+    AURenderCallbackStruct callback;
+    callback.inputProc = input_render_callback;
+    callback.inputProcRefCon = plugin;
+
+    status = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_SetRenderCallback,
+        kAudioUnitScope_Input,
+        0,
+        &callback,
+        sizeof(callback)
+    );
+
+    // This may fail for instruments (no input), which is okay
+    // We don't return error here
+
     // Initialize the AudioUnit
     status = AudioUnitInitialize(plugin->audio_unit);
     if (status != noErr) {
+        // Clean up buffers on failure
+        if (plugin->input_buffer_list) {
+            for (UInt32 i = 0; i < 2; i++) {
+                free(plugin->input_buffer_list->mBuffers[i].mData);
+            }
+            free(plugin->input_buffer_list);
+            plugin->input_buffer_list = nullptr;
+        }
+        if (plugin->output_buffer_list) {
+            for (UInt32 i = 0; i < 2; i++) {
+                free(plugin->output_buffer_list->mBuffers[i].mData);
+            }
+            free(plugin->output_buffer_list);
+            plugin->output_buffer_list = nullptr;
+        }
         return RACK_AU_ERROR_AUDIO_UNIT + status;
     }
 
@@ -179,15 +289,52 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
     if (!plugin || !plugin->initialized) {
         return RACK_AU_ERROR_NOT_INITIALIZED;
     }
-    
+
     if (!input || !output || frames == 0) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
-    
-    // TODO: Implement actual audio processing
-    // For now, just pass through
-    memcpy(output, input, frames * 2 * sizeof(float));  // 2 channels (stereo)
-    
+
+    if (frames > plugin->max_block_size) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Set current input for render callback
+    plugin->current_input = input;
+
+    // Set up AudioTimeStamp
+    AudioTimeStamp timestamp;
+    memset(&timestamp, 0, sizeof(timestamp));
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    timestamp.mSampleTime = 0;
+
+    // Render audio from the AudioUnit
+    AudioUnitRenderActionFlags flags = 0;
+    OSStatus status = AudioUnitRender(
+        plugin->audio_unit,
+        &flags,
+        &timestamp,
+        0,  // Output bus
+        frames,
+        plugin->output_buffer_list
+    );
+
+    plugin->current_input = nullptr;
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Convert non-interleaved output to interleaved stereo
+    if (plugin->output_buffer_list->mNumberBuffers >= 2) {
+        const float* left_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[0].mData);
+        const float* right_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[1].mData);
+
+        for (uint32_t i = 0; i < frames; i++) {
+            output[i * 2] = left_in[i];
+            output[i * 2 + 1] = right_in[i];
+        }
+    }
+
     return RACK_AU_OK;
 }
 
