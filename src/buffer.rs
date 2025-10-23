@@ -1,11 +1,12 @@
 //! Aligned audio buffers for SIMD processing
 
+use aligned_vec::{AVec, ConstAlign};
 use std::ops::{Deref, DerefMut};
 
 /// A 16-byte aligned audio buffer for optimal SIMD performance
 ///
-/// This buffer ensures data is aligned to 16-byte boundaries, enabling
-/// faster aligned SIMD operations (SSE2, NEON) compared to regular Vec<f32>.
+/// This buffer ensures data is aligned to 16-byte boundaries on the heap,
+/// enabling faster aligned SIMD operations (SSE2, NEON) compared to regular Vec<f32>.
 ///
 /// # Performance
 ///
@@ -26,9 +27,8 @@ use std::ops::{Deref, DerefMut};
 /// buffer[0] = 1.0;
 /// assert_eq!(buffer.len(), 1024);
 /// ```
-#[repr(align(16))]
 pub struct AudioBuffer {
-    data: Vec<f32>,
+    data: AVec<f32, ConstAlign<16>>,
 }
 
 impl AudioBuffer {
@@ -47,11 +47,13 @@ impl AudioBuffer {
     #[inline]
     pub fn new(size: usize) -> Self {
         Self {
-            data: vec![0.0; size],
+            data: AVec::from_iter(16, std::iter::repeat(0.0).take(size)),
         }
     }
 
     /// Creates a new aligned audio buffer from existing data
+    ///
+    /// Note: The data will be copied to ensure proper 16-byte alignment.
     ///
     /// # Examples
     ///
@@ -59,12 +61,14 @@ impl AudioBuffer {
     /// use rack::AudioBuffer;
     ///
     /// let data = vec![1.0, 2.0, 3.0, 4.0];
-    /// let buffer = AudioBuffer::from_vec(data);
+    /// let buffer = AudioBuffer::from_slice(&data);
     /// assert_eq!(buffer.len(), 4);
     /// ```
     #[inline]
-    pub fn from_vec(data: Vec<f32>) -> Self {
-        Self { data }
+    pub fn from_slice(data: &[f32]) -> Self {
+        Self {
+            data: AVec::from_iter(16, data.iter().copied()),
+        }
     }
 
     /// Returns the number of samples in the buffer
@@ -147,6 +151,22 @@ mod tests {
     }
 
     #[test]
+    fn test_alignment_after_operations() {
+        // Test that alignment is preserved after various operations
+        let mut buffer = AudioBuffer::new(100);
+        assert_eq!(buffer.as_ptr() as usize % 16, 0);
+
+        buffer.resize(200);
+        assert_eq!(buffer.as_ptr() as usize % 16, 0);
+
+        buffer.clear();
+        assert_eq!(buffer.as_ptr() as usize % 16, 0);
+
+        let cloned = buffer.clone();
+        assert_eq!(cloned.as_ptr() as usize % 16, 0);
+    }
+
+    #[test]
     fn test_new() {
         let buffer = AudioBuffer::new(100);
         assert_eq!(buffer.len(), 100);
@@ -154,13 +174,15 @@ mod tests {
     }
 
     #[test]
-    fn test_from_vec() {
+    fn test_from_slice() {
         let data = vec![1.0, 2.0, 3.0];
-        let buffer = AudioBuffer::from_vec(data);
+        let buffer = AudioBuffer::from_slice(&data);
         assert_eq!(buffer.len(), 3);
         assert_eq!(buffer[0], 1.0);
         assert_eq!(buffer[1], 2.0);
         assert_eq!(buffer[2], 3.0);
+        // Verify alignment
+        assert_eq!(buffer.as_ptr() as usize % 16, 0);
     }
 
     #[test]
@@ -174,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut buffer = AudioBuffer::from_vec(vec![1.0, 2.0, 3.0]);
+        let mut buffer = AudioBuffer::from_slice(&[1.0, 2.0, 3.0]);
         buffer.clear();
         assert!(buffer.iter().all(|&x| x == 0.0));
     }

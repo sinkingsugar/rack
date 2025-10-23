@@ -61,9 +61,12 @@ static OSStatus input_render_callback(
 
     // Copy interleaved input to non-interleaved AudioBufferList
     // NOTE: Currently hardcoded to stereo (2 channels) - mono/surround not yet supported
+    const UInt32 required_bytes = inNumberFrames * sizeof(float);
     if (ioData->mNumberBuffers >= 2 &&
         ioData->mBuffers[0].mData &&
-        ioData->mBuffers[1].mData) {
+        ioData->mBuffers[1].mData &&
+        ioData->mBuffers[0].mDataByteSize >= required_bytes &&
+        ioData->mBuffers[1].mDataByteSize >= required_bytes) {
 
         float* left_out = static_cast<float*>(ioData->mBuffers[0].mData);
         float* right_out = static_cast<float*>(ioData->mBuffers[1].mData);
@@ -346,6 +349,9 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
             free(plugin->input_buffer_list);
             plugin->input_buffer_list = nullptr;
             plugin->output_buffer_list = nullptr;
+            // Clean up AudioUnit instance to prevent leak
+            AudioComponentInstanceDispose(plugin->audio_unit);
+            plugin->audio_unit = nullptr;
             return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
         }
     }
