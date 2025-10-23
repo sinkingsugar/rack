@@ -145,27 +145,21 @@ Tasks:
 - [ ] Preset serialization
 - [ ] Example: preset_browser.rs
 
-### Phase 8: Additional Plugin Formats
-**Goal**: Support VST3, CLAP, and other formats
+### Phase 8: GUI Support (AudioUnit Focus)
+**Goal**: Embed AudioUnit plugin GUIs in host applications
 
 Tasks:
-- [ ] VST3 scanner
-- [ ] VST3 plugin loading
-- [ ] VST3 processing
-- [ ] CLAP support (optional)
-- [ ] Common trait abstraction across formats
-- [ ] Format-agnostic examples
-
-### Phase 9: GUI Support
-**Goal**: Embed plugin GUIs in host applications
-
-Tasks:
-- [ ] Cocoa view support (macOS)
-- [ ] Window/view management
-- [ ] GUI resize handling
+- [ ] Query `kAudioUnitProperty_CocoaUI` for custom views
+- [ ] NSView integration for macOS
+- [ ] Window/view lifecycle management
+- [ ] GUI resize and scaling handling
 - [ ] Generic parameter UI fallback
+- [ ] Event handling (parameter changes from GUI)
+- [ ] Example: plugin_gui.rs
 
-### Phase 10: Advanced Features
+**Note**: Focus on AudioUnit GUI first before adding other plugin formats. This provides complete AudioUnit hosting capabilities.
+
+### Phase 9: Advanced Features
 **Goal**: Production-ready hosting features
 
 Tasks:
@@ -175,6 +169,21 @@ Tasks:
 - [ ] Plugin state serialization
 - [ ] Crash isolation
 - [ ] Plugin sandboxing
+- [ ] Performance profiling and optimization
+
+### Phase 10: Additional Plugin Formats (Deferred)
+**Goal**: Support VST3, CLAP, and other formats
+
+**Rationale**: Complete AudioUnit support first (including GUI) before adding other formats. This ensures a solid reference implementation.
+
+Tasks:
+- [ ] VST3 scanner
+- [ ] VST3 plugin loading
+- [ ] VST3 processing
+- [ ] VST3 GUI support
+- [ ] CLAP support (optional)
+- [ ] Common trait abstraction across formats
+- [ ] Format-agnostic examples
 
 ---
 
