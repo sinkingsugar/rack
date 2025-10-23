@@ -10,3 +10,4 @@ rack-sys/build/
 
 # Temp files
 .restructure_note
+.vscode

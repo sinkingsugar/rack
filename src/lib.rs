@@ -20,9 +20,9 @@
 //! let mut plugin = scanner.load(&plugins[0])?;
 //! plugin.initialize(48000.0, 512)?;
 //!
-//! // Process audio
-//! let input = vec![0.0; 512];
-//! let mut output = vec![0.0; 512];
+//! // Process audio with aligned buffers
+//! let input = AudioBuffer::new(512);
+//! let mut output = AudioBuffer::new(512);
 //! plugin.process(&input, &mut output)?;
 //! # Ok(())
 //! # }
@@ -40,10 +40,12 @@
 //! Currently, AudioUnit hosting is only available on macOS.
 //! VST3 and CLAP support will be cross-platform.
 
+pub mod buffer;
 pub mod error;
 pub mod plugin_info;
 pub mod traits;
 
+pub use buffer::AudioBuffer;
 pub use error::{Error, Result};
 pub use plugin_info::{ParameterInfo, PluginInfo, PluginType};
 pub use traits::{PluginInstance, PluginScanner};
@@ -59,7 +61,8 @@ pub use au::{AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::{
-        Error, ParameterInfo, PluginInfo, PluginInstance, PluginScanner, PluginType, Result,
+        AudioBuffer, Error, ParameterInfo, PluginInfo, PluginInstance, PluginScanner, PluginType,
+        Result,
     };
 
     #[cfg(target_os = "macos")]

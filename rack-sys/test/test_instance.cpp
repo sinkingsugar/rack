@@ -2,6 +2,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <cmath>
 
 void test_invalid_unique_id() {
     std::cout << "Test 1: Invalid unique_id handling\n";
@@ -178,6 +179,130 @@ void test_invalid_parameters() {
     std::cout << "PASS: is_initialized(nullptr) returns 0\n\n";
 }
 
+void test_audio_processing() {
+    std::cout << "Test 4: Audio processing\n";
+    std::cout << "------------------------\n";
+
+    // Scan for a plugin to test with
+    RackAUScanner* scanner = rack_au_scanner_new();
+    if (!scanner) {
+        std::cerr << "FAIL: Failed to create scanner\n";
+        return;
+    }
+
+    int count = rack_au_scanner_scan(scanner, nullptr, 0);
+    if (count <= 0) {
+        std::cerr << "SKIP: No plugins found to test with\n\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    RackAUPluginInfo* plugins = new(std::nothrow) RackAUPluginInfo[count];
+    if (!plugins) {
+        std::cerr << "FAIL: Failed to allocate memory\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int filled = rack_au_scanner_scan(scanner, plugins, count);
+    if (filled <= 0) {
+        std::cerr << "FAIL: Failed to scan plugins\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Find an effect plugin for processing test
+    const char* unique_id = nullptr;
+    const char* plugin_name = nullptr;
+    for (int i = 0; i < filled; i++) {
+        if (plugins[i].plugin_type == RACK_AU_TYPE_EFFECT) {
+            unique_id = plugins[i].unique_id;
+            plugin_name = plugins[i].name;
+            break;
+        }
+    }
+
+    if (!unique_id) {
+        std::cout << "SKIP: No effect plugins found for processing test\n\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "Testing audio processing with: " << plugin_name << "\n";
+
+    // Create and initialize plugin
+    RackAUPlugin* plugin = rack_au_plugin_new(unique_id);
+    if (!plugin) {
+        std::cerr << "FAIL: Failed to create plugin instance\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int result = rack_au_plugin_initialize(plugin, 48000.0, 512);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to initialize plugin (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Create test buffers (512 frames of stereo audio)
+    const uint32_t frames = 512;
+    float* input = new float[frames * 2];
+    float* output = new float[frames * 2];
+
+    // Fill input with a simple sine wave
+    const float frequency = 440.0f; // A4
+    const float sample_rate = 48000.0f;
+    for (uint32_t i = 0; i < frames; i++) {
+        float sample = sinf(2.0f * 3.14159265f * frequency * i / sample_rate) * 0.5f;
+        input[i * 2] = sample;      // Left channel
+        input[i * 2 + 1] = sample;  // Right channel
+    }
+
+    // Process audio
+    result = rack_au_plugin_process(plugin, input, output, frames);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Audio processing failed (error: " << result << ")\n";
+        delete[] input;
+        delete[] output;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "PASS: Audio processing succeeded\n";
+
+    // Verify output is not all zeros (plugin did something)
+    bool has_signal = false;
+    for (uint32_t i = 0; i < frames * 2; i++) {
+        if (output[i] != 0.0f) {
+            has_signal = true;
+            break;
+        }
+    }
+
+    if (has_signal) {
+        std::cout << "PASS: Output contains audio signal\n";
+    } else {
+        std::cout << "WARN: Output is silent (may be expected for some effects)\n";
+    }
+
+    // Cleanup
+    delete[] input;
+    delete[] output;
+    rack_au_plugin_free(plugin);
+    delete[] plugins;
+    rack_au_scanner_free(scanner);
+
+    std::cout << "\n";
+}
+
 int main() {
     std::cout << "AudioUnit Plugin Instance Test\n";
     std::cout << "===============================\n\n";
@@ -185,6 +310,7 @@ int main() {
     test_invalid_unique_id();
     test_plugin_lifecycle();
     test_invalid_parameters();
+    test_audio_processing();
 
     std::cout << "All tests completed!\n";
     return 0;

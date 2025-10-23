@@ -10,6 +10,7 @@ keywords = ["audio", "plugin", "vst", "audiounit", "host"]
 categories = ["multimedia::audio"]
 
 [dependencies]
+aligned-vec = "0.6.4"
 thiserror = "2.0"
 
 [build-dependencies]
@@ -27,6 +28,10 @@ path = "examples/list_plugins.rs"
 [[example]]
 name = "load_plugin"
 path = "examples/load_plugin.rs"
+
+[[example]]
+name = "process_audio"
+path = "examples/process_audio.rs"
 
 [profile.dev]
 opt-level = 2  # Audio needs some optimization even in debug

@@ -1,4 +1,4 @@
-use crate::{Error, ParameterInfo, PluginInfo, PluginInstance, Result};
+use crate::{AudioBuffer, Error, ParameterInfo, PluginInfo, PluginInstance, Result};
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -72,7 +72,7 @@ impl PluginInstance for AudioUnitPlugin {
         }
     }
 
-    fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
+    fn process(&mut self, input: &AudioBuffer, output: &mut AudioBuffer) -> Result<()> {
         if !self.is_initialized() {
             return Err(Error::NotInitialized);
         }
@@ -293,5 +293,58 @@ mod tests {
             let _plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
         }
         // Plugin should be cleaned up here without crashing
+    }
+
+    #[test]
+    fn test_audio_processing() {
+        use super::super::scanner::AudioUnitScanner;
+
+        let scanner = AudioUnitScanner::new().expect("Failed to create scanner");
+        let plugins = scanner.scan().expect("Failed to scan plugins");
+
+        // Find an effect plugin for processing test
+        let Some(info) = plugins
+            .into_iter()
+            .find(|p| p.plugin_type == PluginType::Effect)
+        else {
+            println!("No effect plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing audio processing with: {}", info.name);
+
+        // Create and initialize plugin
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Create test buffers (512 frames of stereo audio = 1024 samples)
+        let frames = 512;
+        let mut input = AudioBuffer::new(frames * 2);
+        let mut output = AudioBuffer::new(frames * 2);
+
+        // Fill input with a simple sine wave (440 Hz)
+        let frequency = 440.0f32;
+        let sample_rate = 48000.0f32;
+        for i in 0..frames {
+            let sample = (2.0 * std::f32::consts::PI * frequency * i as f32 / sample_rate).sin() * 0.5;
+            input[i * 2] = sample; // Left channel
+            input[i * 2 + 1] = sample; // Right channel
+        }
+
+        // Process audio
+        plugin
+            .process(&input, &mut output)
+            .expect("Audio processing failed");
+
+        // Verify output is not all zeros (plugin did something)
+        let has_signal = output.iter().any(|&sample| sample != 0.0);
+        assert!(
+            has_signal,
+            "Output should contain audio signal (not all zeros)"
+        );
+
+        println!("✓ Audio processing succeeded, output contains signal");
     }
 }
