@@ -42,11 +42,13 @@
 
 pub mod buffer;
 pub mod error;
+pub mod midi;
 pub mod plugin_info;
 pub mod traits;
 
 pub use buffer::AudioBuffer;
 pub use error::{Error, Result};
+pub use midi::{MidiEvent, MidiEventKind};
 pub use plugin_info::{ParameterInfo, PluginInfo, PluginType};
 pub use traits::{PluginInstance, PluginScanner};
 
@@ -61,8 +63,8 @@ pub use au::{AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::{
-        AudioBuffer, Error, ParameterInfo, PluginInfo, PluginInstance, PluginScanner, PluginType,
-        Result,
+        AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance,
+        PluginScanner, PluginType, Result,
     };
 
     #[cfg(target_os = "macos")]

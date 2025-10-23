@@ -128,6 +128,39 @@ int rack_au_plugin_parameter_info(
     size_t unit_size
 );
 
+// ============================================================================
+// MIDI API
+// ============================================================================
+
+// MIDI event types
+typedef enum {
+    RACK_AU_MIDI_NOTE_ON = 0x90,
+    RACK_AU_MIDI_NOTE_OFF = 0x80,
+    RACK_AU_MIDI_CONTROL_CHANGE = 0xB0,
+    RACK_AU_MIDI_PROGRAM_CHANGE = 0xC0,
+} RackAUMidiEventType;
+
+// MIDI event struct
+typedef struct {
+    uint32_t sample_offset;  // Sample offset within buffer
+    uint8_t status;          // MIDI status byte
+    uint8_t data1;           // First data byte (note/CC number)
+    uint8_t data2;           // Second data byte (velocity/value)
+    uint8_t channel;         // MIDI channel (0-15)
+} RackAUMidiEvent;
+
+// Send MIDI events to plugin
+// events: array of MIDI events
+// event_count: number of events in array
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Should be called from the same thread that owns the plugin instance.
+// Not safe to call concurrently with process() or other plugin operations.
+int rack_au_plugin_send_midi(
+    RackAUPlugin* plugin,
+    const RackAUMidiEvent* events,
+    uint32_t event_count
+);
+
 #ifdef __cplusplus
 }
 #endif

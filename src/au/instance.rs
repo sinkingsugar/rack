@@ -1,4 +1,4 @@
-use crate::{AudioBuffer, Error, ParameterInfo, PluginInfo, PluginInstance, Result};
+use crate::{AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, Result};
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -186,6 +186,55 @@ impl PluginInstance for AudioUnitPlugin {
         unsafe {
             let result =
                 ffi::rack_au_plugin_set_parameter(self.inner.as_ptr(), index as u32, value);
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
+        }
+    }
+
+    fn send_midi(&mut self, events: &[MidiEvent]) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        // Convert Rust MIDI events to FFI events
+        let ffi_events: Vec<ffi::RackAUMidiEvent> = events
+            .iter()
+            .map(|event| {
+                let (status, data1, data2, channel) = match event.kind {
+                    MidiEventKind::NoteOn { note, velocity, channel } => {
+                        (ffi::RackAUMidiEventType::NoteOn as u8, note, velocity, channel)
+                    }
+                    MidiEventKind::NoteOff { note, velocity, channel } => {
+                        (ffi::RackAUMidiEventType::NoteOff as u8, note, velocity, channel)
+                    }
+                    MidiEventKind::ControlChange { controller, value, channel } => {
+                        (ffi::RackAUMidiEventType::ControlChange as u8, controller, value, channel)
+                    }
+                    MidiEventKind::ProgramChange { program, channel } => {
+                        (ffi::RackAUMidiEventType::ProgramChange as u8, program, 0, channel)
+                    }
+                };
+
+                ffi::RackAUMidiEvent {
+                    sample_offset: event.sample_offset,
+                    status,
+                    data1,
+                    data2,
+                    channel,
+                }
+            })
+            .collect();
+
+        unsafe {
+            let result = ffi::rack_au_plugin_send_midi(
+                self.inner.as_ptr(),
+                ffi_events.as_ptr(),
+                ffi_events.len() as u32,
+            );
 
             if result != ffi::RACK_AU_OK {
                 return Err(map_error(result));
@@ -638,5 +687,225 @@ mod tests {
         // AudioUnit returns error -67743 (kAudioUnitErr_InvalidParameter)
         // This is correct behavior - we don't need to test these edge cases
         // as AudioUnit provides its own validation
+    }
+
+    // ============================================================================
+    // MIDI Tests
+    // ============================================================================
+
+    // Helper to get an instrument plugin for MIDI testing
+    fn get_instrument_plugin() -> Option<PluginInfo> {
+        use super::super::scanner::AudioUnitScanner;
+
+        let scanner = AudioUnitScanner::new().ok()?;
+        let plugins = scanner.scan().ok()?;
+
+        plugins
+            .into_iter()
+            .find(|p| p.plugin_type == PluginType::Instrument)
+    }
+
+    #[test]
+    fn test_send_midi_note_on_off() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing MIDI with instrument: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send a C major chord
+        let events = vec![
+            MidiEvent::note_on(60, 100, 0, 0), // Middle C
+            MidiEvent::note_on(64, 100, 0, 0), // E
+            MidiEvent::note_on(67, 100, 0, 0), // G
+        ];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send MIDI events");
+
+        println!("✓ MIDI note on events sent successfully");
+
+        // Process audio to render the notes
+        let input = AudioBuffer::new(512 * 2);
+        let mut output = AudioBuffer::new(512 * 2);
+
+        let result = plugin.process(&input, &mut output);
+        assert!(result.is_ok(), "Failed to process audio after MIDI");
+
+        println!("✓ Audio processed after MIDI events");
+
+        // Send note off events
+        let events = vec![
+            MidiEvent::note_off(60, 64, 0, 0),
+            MidiEvent::note_off(64, 64, 0, 0),
+            MidiEvent::note_off(67, 64, 0, 0),
+        ];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send MIDI note off events");
+
+        println!("✓ MIDI note off events sent successfully");
+    }
+
+    #[test]
+    fn test_send_midi_control_change() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send control change (modulation wheel)
+        let events = vec![MidiEvent::control_change(1, 64, 0, 0)];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send MIDI control change");
+
+        println!("✓ MIDI control change sent successfully");
+    }
+
+    #[test]
+    fn test_send_midi_program_change() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send program change
+        let events = vec![MidiEvent::program_change(5, 0, 0)];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send MIDI program change");
+
+        println!("✓ MIDI program change sent successfully");
+    }
+
+    #[test]
+    fn test_send_midi_empty_events() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send empty event array (should succeed)
+        let events: Vec<MidiEvent> = vec![];
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Empty MIDI array should succeed");
+
+        println!("✓ Empty MIDI event array handled correctly");
+    }
+
+    #[test]
+    fn test_send_midi_before_init() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+
+        // Try to send MIDI before initialization
+        let events = vec![MidiEvent::note_on(60, 100, 0, 0)];
+        let result = plugin.send_midi(&events);
+
+        assert!(result.is_err(), "send_midi should fail before initialization");
+        assert!(matches!(result, Err(Error::NotInitialized)));
+
+        println!("✓ send_midi correctly fails before initialization");
+    }
+
+    #[test]
+    fn test_midi_with_effect_plugin() {
+        use super::super::scanner::AudioUnitScanner;
+
+        let scanner = AudioUnitScanner::new().expect("Failed to create scanner");
+        let plugins = scanner.scan().expect("Failed to scan plugins");
+
+        // Find an effect plugin
+        let Some(info) = plugins
+            .into_iter()
+            .find(|p| p.plugin_type == PluginType::Effect)
+        else {
+            println!("No effect plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send MIDI to effect plugin (should either fail or be ignored)
+        let events = vec![MidiEvent::note_on(60, 100, 0, 0)];
+        let result = plugin.send_midi(&events);
+
+        // Effect plugins typically don't support MIDI, so this may fail
+        // or succeed with the event being ignored
+        match result {
+            Ok(_) => println!("Effect plugin accepted MIDI (may be ignored)"),
+            Err(_) => println!("✓ Effect plugin rejected MIDI as expected"),
+        }
+    }
+
+    #[test]
+    fn test_midi_value_clamping() {
+        // Test that MidiEvent helper functions clamp values correctly
+        let event = MidiEvent::note_on(200, 200, 20, 0);
+
+        match event.kind {
+            MidiEventKind::NoteOn { note, velocity, channel } => {
+                assert_eq!(note, 127, "Note should be clamped to 127");
+                assert_eq!(velocity, 127, "Velocity should be clamped to 127");
+                assert_eq!(channel, 15, "Channel should be clamped to 15");
+            }
+            _ => panic!("Expected NoteOn event"),
+        }
+
+        println!("✓ MIDI value clamping works correctly");
+    }
+
+    #[test]
+    fn test_midi_sample_offset() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send events with different sample offsets
+        let events = vec![
+            MidiEvent::note_on(60, 100, 0, 0),
+            MidiEvent::note_on(64, 100, 0, 128),
+            MidiEvent::note_on(67, 100, 0, 256),
+        ];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send MIDI events with sample offsets");
+
+        println!("✓ MIDI events with sample offsets sent successfully");
     }
 }

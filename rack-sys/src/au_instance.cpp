@@ -863,3 +863,60 @@ int rack_au_plugin_parameter_info(
 
     return RACK_AU_OK;
 }
+
+// ============================================================================
+// MIDI Implementation
+// ============================================================================
+
+int rack_au_plugin_send_midi(
+    RackAUPlugin* plugin,
+    const RackAUMidiEvent* events,
+    uint32_t event_count
+) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    if (!events && event_count > 0) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Early return if no events to send
+    if (event_count == 0) {
+        return RACK_AU_OK;
+    }
+
+    // Send each MIDI event to the AudioUnit
+    // Using MusicDeviceMIDIEvent for simplicity (sample-accurate timing can be added later)
+    for (uint32_t i = 0; i < event_count; i++) {
+        const RackAUMidiEvent* event = &events[i];
+
+        // Validate MIDI channel (0-15)
+        if (event->channel > 15) {
+            return RACK_AU_ERROR_INVALID_PARAM;
+        }
+
+        // Combine status byte with channel
+        // Status byte upper nibble (0x90, 0x80, etc.) + channel lower nibble (0-15)
+        uint8_t status = event->status | (event->channel & 0x0F);
+
+        // Send MIDI event to AudioUnit
+        // MusicDeviceMIDIEvent is the primary API for sending MIDI to instrument plugins
+        // For effect plugins that don't implement this, the call will fail gracefully
+        OSStatus result = MusicDeviceMIDIEvent(
+            plugin->audio_unit,
+            status,
+            event->data1,
+            event->data2,
+            0  // Sample offset (0 = immediate, can be enhanced later for sample-accurate timing)
+        );
+
+        // Note: Some effect plugins don't support MIDI, so we check the error
+        // and return it to let Rust handle the failure gracefully
+        if (result != noErr) {
+            return RACK_AU_ERROR_AUDIO_UNIT + result;
+        }
+    }
+
+    return RACK_AU_OK;
+}

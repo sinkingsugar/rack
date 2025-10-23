@@ -261,4 +261,48 @@ extern "C" {
         unit: *mut c_char,
         unit_size: usize,
     ) -> c_int;
+
+    // ============================================================================
+    // MIDI API
+    // ============================================================================
+
+    /// Send MIDI events to plugin
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - `events` must point to an array with at least `event_count` elements, or NULL if event_count is 0
+    /// - All events must have valid channel (0-15) and data values
+    /// - Must not be called concurrently with process() or other plugin operations
+    pub fn rack_au_plugin_send_midi(
+        plugin: *mut RackAUPlugin,
+        events: *const RackAUMidiEvent,
+        event_count: u32,
+    ) -> c_int;
+}
+
+// MIDI event types
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RackAUMidiEventType {
+    NoteOn = 0x90,
+    NoteOff = 0x80,
+    ControlChange = 0xB0,
+    ProgramChange = 0xC0,
+}
+
+// MIDI event struct (matches C layout exactly)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RackAUMidiEvent {
+    pub sample_offset: u32,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+    pub channel: u8,
 }

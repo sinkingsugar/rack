@@ -480,6 +480,201 @@ void test_parameter_operations() {
     std::cout << "\n";
 }
 
+void test_midi_operations() {
+    std::cout << "Test 6: MIDI operations\n";
+    std::cout << "------------------------\n";
+
+    // Scan for a plugin to test with
+    RackAUScanner* scanner = rack_au_scanner_new();
+    if (!scanner) {
+        std::cerr << "FAIL: Failed to create scanner\n";
+        return;
+    }
+
+    int count = rack_au_scanner_scan(scanner, nullptr, 0);
+    if (count <= 0) {
+        std::cerr << "SKIP: No plugins found to test with\n\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    RackAUPluginInfo* plugins = new(std::nothrow) RackAUPluginInfo[count];
+    if (!plugins) {
+        std::cerr << "FAIL: Failed to allocate memory\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int filled = rack_au_scanner_scan(scanner, plugins, count);
+    if (filled <= 0) {
+        std::cerr << "FAIL: Failed to scan plugins\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Find an instrument plugin for MIDI testing
+    const char* unique_id = nullptr;
+    const char* plugin_name = nullptr;
+    for (int i = 0; i < filled; i++) {
+        if (plugins[i].plugin_type == RACK_AU_TYPE_INSTRUMENT) {
+            unique_id = plugins[i].unique_id;
+            plugin_name = plugins[i].name;
+            break;
+        }
+    }
+
+    if (!unique_id) {
+        std::cout << "SKIP: No instrument plugins found for MIDI test\n\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "Testing MIDI with: " << plugin_name << "\n";
+
+    // Create and initialize plugin
+    RackAUPlugin* plugin = rack_au_plugin_new(unique_id);
+    if (!plugin) {
+        std::cerr << "FAIL: Failed to create plugin instance\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int result = rack_au_plugin_initialize(plugin, 48000.0, 512);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to initialize plugin (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Test: Send a single MIDI note
+    RackAUMidiEvent events[3];
+
+    // Note On: Middle C (note 60), velocity 100, channel 0
+    events[0].sample_offset = 0;
+    events[0].status = RACK_AU_MIDI_NOTE_ON;
+    events[0].data1 = 60;
+    events[0].data2 = 100;
+    events[0].channel = 0;
+
+    // Note On: E (note 64), velocity 100, channel 0
+    events[1].sample_offset = 0;
+    events[1].status = RACK_AU_MIDI_NOTE_ON;
+    events[1].data1 = 64;
+    events[1].data2 = 100;
+    events[1].channel = 0;
+
+    // Note On: G (note 67), velocity 100, channel 0
+    events[2].sample_offset = 0;
+    events[2].status = RACK_AU_MIDI_NOTE_ON;
+    events[2].data1 = 67;
+    events[2].data2 = 100;
+    events[2].channel = 0;
+
+    result = rack_au_plugin_send_midi(plugin, events, 3);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to send MIDI events (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: MIDI events sent successfully (C major chord)\n";
+
+    // Process audio to render the notes
+    const uint32_t frames = 512;
+    float* input = new float[frames * 2];
+    float* output = new float[frames * 2];
+
+    // Clear buffers
+    memset(input, 0, frames * 2 * sizeof(float));
+    memset(output, 0, frames * 2 * sizeof(float));
+
+    // Process audio (instrument should generate sound from MIDI)
+    result = rack_au_plugin_process(plugin, input, output, frames);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Audio processing failed after MIDI (error: " << result << ")\n";
+        delete[] input;
+        delete[] output;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Check if output contains audio signal (MIDI notes rendered)
+    bool has_signal = false;
+    for (uint32_t i = 0; i < frames * 2; i++) {
+        if (output[i] != 0.0f) {
+            has_signal = true;
+            break;
+        }
+    }
+
+    if (has_signal) {
+        std::cout << "PASS: Output contains audio from MIDI notes\n";
+    } else {
+        std::cout << "WARN: Output is silent (plugin may need more time or different MIDI setup)\n";
+    }
+
+    // Test: Send Note Off events
+    events[0].status = RACK_AU_MIDI_NOTE_OFF;
+    events[1].status = RACK_AU_MIDI_NOTE_OFF;
+    events[2].status = RACK_AU_MIDI_NOTE_OFF;
+
+    result = rack_au_plugin_send_midi(plugin, events, 3);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to send Note Off events (error: " << result << ")\n";
+        delete[] input;
+        delete[] output;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: Note Off events sent successfully\n";
+
+    // Test: Invalid channel (> 15)
+    events[0].channel = 20;
+    result = rack_au_plugin_send_midi(plugin, events, 1);
+    if (result == RACK_AU_OK) {
+        std::cerr << "FAIL: Should reject invalid MIDI channel\n";
+        delete[] input;
+        delete[] output;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: Invalid MIDI channel rejected\n";
+
+    // Test: Empty event array (should succeed)
+    result = rack_au_plugin_send_midi(plugin, nullptr, 0);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Empty MIDI array should succeed\n";
+        delete[] input;
+        delete[] output;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: Empty MIDI event array handled correctly\n";
+
+    // Cleanup
+    delete[] input;
+    delete[] output;
+    rack_au_plugin_free(plugin);
+    delete[] plugins;
+    rack_au_scanner_free(scanner);
+
+    std::cout << "\n";
+}
+
 int main() {
     std::cout << "AudioUnit Plugin Instance Test\n";
     std::cout << "===============================\n\n";
@@ -489,6 +684,7 @@ int main() {
     test_invalid_parameters();
     test_audio_processing();
     test_parameter_operations();
+    test_midi_operations();
 
     std::cout << "All tests completed!\n";
     return 0;
