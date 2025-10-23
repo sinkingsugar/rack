@@ -122,18 +122,49 @@
 
 ---
 
-## 📋 Future Phases
-
 ### Phase 6: MIDI Support
-**Goal**: Send MIDI events to instrument plugins
+- [x] C++ MIDI implementation (`rack-sys/src/au_instance.cpp`)
+- [x] MusicDeviceMIDIEvent() integration for sample-accurate MIDI
+- [x] Complete MIDI 1.0 message support (13 message types)
+- [x] Channel messages: Note On/Off, Polyphonic Aftertouch, Control Change, Program Change, Channel Aftertouch, Pitch Bend
+- [x] System Real-Time messages: Timing Clock, Start, Continue, Stop, Active Sensing, System Reset
+- [x] FFI bindings for MIDI functions
+- [x] Safe Rust wrapper (`src/midi.rs`)
+- [x] Zero-allocation MIDI with SmallVec (stack-allocated for ≤16 events)
+- [x] Helper methods for all MIDI message types
+- [x] Pitch bend center value constant and helper
+- [x] C++ tests (Test 6: MIDI operations)
+- [x] Rust integration tests (7 MIDI tests including multi-channel)
+- [x] Example: `simple_synth.rs` with C major chord demo
+- [x] All PR review issues addressed
 
-Tasks:
-- [ ] Implement MIDI event sending
-- [ ] Note on/off support
-- [ ] Control change (CC) support
-- [ ] Program change support
-- [ ] MIDI timing and scheduling
-- [ ] Example: simple_synth.rs
+**Status**: MIDI support complete. Successfully send all MIDI 1.0 messages to AudioUnit instrument plugins with zero-allocation performance.
+
+**Key Files**:
+- `rack-sys/src/au_instance.cpp` - MIDI implementation with AudioUnit API
+- `src/midi.rs` - Safe Rust MIDI types with comprehensive message support
+- `src/au/instance.rs` - Zero-allocation MIDI sending with SmallVec
+- `examples/simple_synth.rs` - Complete MIDI synthesis demonstration
+
+**Test Results**:
+- 44/44 Rust tests passing (added 7 MIDI tests)
+- 6/6 C++ tests passing (added MIDI operations test)
+- All examples working (including simple_synth)
+
+**Performance**:
+- Zero heap allocation for typical use (≤16 events) via SmallVec
+- Sample-accurate timing via sample_offset parameter
+- 14-bit pitch bend resolution with automatic LSB/MSB splitting
+
+**MIDI Coverage**:
+- All 7 MIDI 1.0 channel messages
+- All 6 system real-time messages
+- Pitch bend with PITCH_BEND_CENTER constant (8192)
+- Better error messages for effect plugins rejecting MIDI
+
+---
+
+## 📋 Future Phases
 
 ### Phase 7: Preset Management
 **Goal**: Load and save plugin presets
@@ -189,215 +220,11 @@ Tasks:
 
 ## 🎯 Immediate Next Steps
 
-**Start Here** (Phase 6 - MIDI Support):
+**Start Here** (Phase 7 - Preset Management OR Phase 8 - GUI Support):
 
-### Goal
-Enable sending MIDI events to AudioUnit instrument plugins for note playback and control changes.
+The next priority phases are:
+- **Phase 8: GUI Support** - Recommended next for complete AudioUnit hosting
+- **Phase 7: Preset Management** - Useful but less critical than GUI
 
-### 1. Implement C++ MIDI Functions
-
-**File**: `rack-sys/include/rack_au.h`
-
-```cpp
-// MIDI event types
-typedef enum {
-    RACK_AU_MIDI_NOTE_ON = 0x90,
-    RACK_AU_MIDI_NOTE_OFF = 0x80,
-    RACK_AU_MIDI_CONTROL_CHANGE = 0xB0,
-    RACK_AU_MIDI_PROGRAM_CHANGE = 0xC0,
-} RackAUMidiEventType;
-
-// MIDI event struct
-typedef struct {
-    uint32_t sample_offset;  // Sample offset within buffer
-    uint8_t status;          // MIDI status byte
-    uint8_t data1;           // First data byte (note/CC number)
-    uint8_t data2;           // Second data byte (velocity/value)
-    uint8_t channel;         // MIDI channel (0-15)
-} RackAUMidiEvent;
-
-// Send MIDI events to plugin
-int rack_au_plugin_send_midi(
-    RackAUPlugin* plugin,
-    const RackAUMidiEvent* events,
-    uint32_t event_count
-);
-```
-
-**File**: `rack-sys/src/au_instance.cpp`
-
-Implementation steps:
-1. Use `MusicDeviceMIDIEvent()` for simple note on/off
-2. Handle MIDI channel routing
-3. Support sample-accurate timing with `AudioUnitRender` timestamps
-4. Queue MIDI events for next `process()` call
-5. Handle polyphony and note stealing
-
-### 2. Add FFI Bindings
-
-**File**: `src/au/ffi.rs`
-
-```rust
-#[repr(C)]
-pub struct RackAUMidiEvent {
-    pub sample_offset: u32,
-    pub status: u8,
-    pub data1: u8,
-    pub data2: u8,
-    pub channel: u8,
-}
-
-extern "C" {
-    pub fn rack_au_plugin_send_midi(
-        plugin: *mut RackAUPlugin,
-        events: *const RackAUMidiEvent,
-        event_count: u32,
-    ) -> c_int;
-}
-```
-
-### 3. Create Safe Rust API
-
-**File**: `src/midi.rs` (new file)
-
-```rust
-pub struct MidiEvent {
-    pub sample_offset: u32,
-    pub kind: MidiEventKind,
-}
-
-pub enum MidiEventKind {
-    NoteOn { note: u8, velocity: u8, channel: u8 },
-    NoteOff { note: u8, velocity: u8, channel: u8 },
-    ControlChange { controller: u8, value: u8, channel: u8 },
-    ProgramChange { program: u8, channel: u8 },
-}
-```
-
-**Update `src/traits.rs`**:
-```rust
-fn send_midi(&mut self, events: &[MidiEvent]) -> Result<()>;
-```
-
-### 4. Add Tests
-
-**C++ tests** (`rack-sys/test/test_instance.cpp`):
-```cpp
-void test_midi_note_on_off();
-void test_midi_control_change();
-void test_midi_timing();
-void test_midi_polyphony();
-```
-
-**Rust tests** (`src/au/instance.rs`):
-```rust
-#[test]
-fn test_send_midi_note();
-
-#[test]
-fn test_send_midi_cc();
-
-#[test]
-fn test_midi_event_timing();
-```
-
-### 5. Create Example
-
-**File**: `examples/simple_synth.rs`
-
-```rust
-use rack::prelude::*;
-use rack::midi::*;
-
-fn main() -> Result<()> {
-    let scanner = Scanner::new()?;
-    let plugins = scanner.scan()?;
-
-    // Find an instrument plugin
-    let synth = plugins.iter()
-        .find(|p| p.plugin_type == PluginType::Instrument)
-        .expect("No instrument plugins found");
-
-    let mut plugin = scanner.load(synth)?;
-    plugin.initialize(48000.0, 512)?;
-
-    // Play a C major chord
-    let events = vec![
-        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 60, velocity: 100, channel: 0 }},
-        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 64, velocity: 100, channel: 0 }},
-        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 67, velocity: 100, channel: 0 }},
-    ];
-
-    plugin.send_midi(&events)?;
-
-    // Process audio to render the notes
-    let mut output = AudioBuffer::new(512 * 2);
-    plugin.process(&AudioBuffer::new(512 * 2), &mut output)?;
-
-    Ok(())
-}
-```
-
-### Commands
-
-```bash
-# Build C++ changes
-cd rack-sys/build
-cmake --build .
-./rack_sys_test_instance
-
-# Build and test Rust
-cd ~/devel/rack
-cargo test
-
-# Run example
-cargo run --example simple_synth
-```
-
----
-
-## 📝 MIDI Implementation Notes
-
-### AudioUnit MIDI API
-
-AudioUnit provides two main methods for MIDI:
-1. **MusicDeviceMIDIEvent()** - Simple, immediate MIDI events
-2. **Render callback with MIDI** - Sample-accurate timing
-
-Start with MusicDeviceMIDIEvent for simplicity.
-
-### Sample-Accurate Timing
-
-For proper timing:
-- Queue MIDI events with sample offsets
-- Send events during `AudioUnitRender` callback
-- Respect buffer boundaries
-
-### Polyphony Handling
-
-- AudioUnit handles polyphony internally
-- No need to track voice allocation
-- Some plugins have polyphony limits
-
-### Testing Strategy
-
-1. **Unit tests**: Test MIDI event conversion
-2. **Integration tests**: Test with real instrument plugins
-3. **Manual testing**: Verify note playback sounds correct
-
----
-
-## 📚 Resources
-
-### AudioUnit MIDI Documentation
-- [Music Device Properties](https://developer.apple.com/documentation/audiounit/music_effects)
-- [MusicDeviceMIDIEvent Reference](https://developer.apple.com/documentation/audiounit/musicdevicemidievent)
-- [Core MIDI Overview](https://developer.apple.com/documentation/coremidi)
-
-### Success Criteria
-- [ ] Send note on/off to instrument plugins
-- [ ] Control change (CC) support
-- [ ] Sample-accurate timing
-- [ ] All tests passing (C++ and Rust)
-- [ ] Example demonstrates chord playback
-- [ ] No MIDI message loss or corruption
+### Phase 8: GUI Support (Recommended)
+Complete AudioUnit hosting by adding GUI integration. See Phase 8 details above for tasks.
