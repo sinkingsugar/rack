@@ -4,6 +4,10 @@
 #include <cstring>
 #include <cstdio>  // for sscanf
 
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
 // Internal plugin state
 struct RackAUPlugin {
     AudioComponentInstance audio_unit;
@@ -19,6 +23,9 @@ struct RackAUPlugin {
     // Thread safety: AudioUnitRender is synchronous - the callback executes
     // on the calling thread before AudioUnitRender returns, so no race condition
     const float* current_input;
+
+    // Sample position tracking for AudioTimeStamp
+    int64_t sample_position;
 };
 
 // ============================================================================
@@ -57,10 +64,27 @@ static OSStatus input_render_callback(
         float* right_out = static_cast<float*>(ioData->mBuffers[1].mData);
         const float* interleaved = plugin->current_input;
 
+#ifdef __ARM_NEON
+        // SIMD-optimized deinterleaving: process 4 frames at a time
+        UInt32 i = 0;
+        UInt32 simd_frames = (inNumberFrames / 4) * 4;
+        for (; i < simd_frames; i += 4) {
+            float32x4x2_t stereo = vld2q_f32(&interleaved[i * 2]);
+            vst1q_f32(&left_out[i], stereo.val[0]);
+            vst1q_f32(&right_out[i], stereo.val[1]);
+        }
+        // Handle remaining frames (scalar fallback)
+        for (; i < inNumberFrames; i++) {
+            left_out[i] = interleaved[i * 2];
+            right_out[i] = interleaved[i * 2 + 1];
+        }
+#else
+        // Scalar fallback for non-ARM platforms
         for (UInt32 i = 0; i < inNumberFrames; i++) {
             left_out[i] = interleaved[i * 2];
             right_out[i] = interleaved[i * 2 + 1];
         }
+#endif
     } else {
         // Buffer validation failed - return silence
         *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
@@ -105,6 +129,7 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     plugin->input_buffer_list = nullptr;
     plugin->output_buffer_list = nullptr;
     plugin->current_input = nullptr;
+    plugin->sample_position = 0;
     strncpy(plugin->unique_id, unique_id, sizeof(plugin->unique_id) - 1);
     plugin->unique_id[sizeof(plugin->unique_id) - 1] = '\0';
 
@@ -357,11 +382,11 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
     // Set current input for render callback
     plugin->current_input = input;
 
-    // Set up AudioTimeStamp
+    // Set up AudioTimeStamp with running sample position
     AudioTimeStamp timestamp;
     memset(&timestamp, 0, sizeof(timestamp));
     timestamp.mFlags = kAudioTimeStampSampleTimeValid;
-    timestamp.mSampleTime = 0;
+    timestamp.mSampleTime = plugin->sample_position;
 
     // Render audio from the AudioUnit
     AudioUnitRenderActionFlags flags = 0;
@@ -391,14 +416,35 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
         const float* left_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[0].mData);
         const float* right_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[1].mData);
 
+#ifdef __ARM_NEON
+        // SIMD-optimized interleaving: process 4 frames at a time
+        uint32_t i = 0;
+        uint32_t simd_frames = (frames / 4) * 4;
+        for (; i < simd_frames; i += 4) {
+            float32x4x2_t stereo;
+            stereo.val[0] = vld1q_f32(&left_in[i]);
+            stereo.val[1] = vld1q_f32(&right_in[i]);
+            vst2q_f32(&output[i * 2], stereo);
+        }
+        // Handle remaining frames (scalar fallback)
+        for (; i < frames; i++) {
+            output[i * 2] = left_in[i];
+            output[i * 2 + 1] = right_in[i];
+        }
+#else
+        // Scalar fallback for non-ARM platforms
         for (uint32_t i = 0; i < frames; i++) {
             output[i * 2] = left_in[i];
             output[i * 2 + 1] = right_in[i];
         }
+#endif
     } else {
         // Buffer validation failed - return silence
         memset(output, 0, frames * 2 * sizeof(float));
     }
+
+    // Update sample position for next call
+    plugin->sample_position += frames;
 
     return RACK_AU_OK;
 }
