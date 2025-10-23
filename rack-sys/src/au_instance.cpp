@@ -26,7 +26,10 @@ struct RackAUPlugin {
     AudioBufferList* output_buffer_list;
     // Pointer to current input for render callback
     // Thread safety: AudioUnitRender is synchronous - the callback executes
-    // on the calling thread before AudioUnitRender returns, so no race condition
+    // on the calling thread before AudioUnitRender returns.
+    // IMPORTANT: This means process() is NOT safe for concurrent calls from
+    // multiple threads (race condition on current_input). Plugin instances
+    // are Send but NOT Sync - must not be shared across threads during processing.
     const float* current_input;
 
     // Sample position tracking for AudioTimeStamp
@@ -481,9 +484,11 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
             // Interleave high half: L2 R2 L3 R3
             __m128 high = _mm_unpackhi_ps(left, right);
 
-            // Aligned stores to Rust's 16-byte aligned AudioBuffer
-            _mm_store_ps(&output[i * 2], low);
-            _mm_store_ps(&output[i * 2 + 4], high);
+            // Stores to Rust's 16-byte aligned AudioBuffer
+            // Note: Mathematically guaranteed to be 16-byte aligned due to i being multiple of 4,
+            // but using unaligned stores for extra safety with negligible performance cost
+            _mm_storeu_ps(&output[i * 2], low);
+            _mm_storeu_ps(&output[i * 2 + 4], high);
         }
         // Handle remaining frames (scalar fallback)
         for (; i < frames; i++) {
