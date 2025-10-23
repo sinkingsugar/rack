@@ -1,4 +1,4 @@
-use crate::{AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, Result};
+use crate::{AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, PresetInfo, Result};
 use smallvec::SmallVec;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -299,6 +299,299 @@ impl PluginInstance for AudioUnitPlugin {
         unsafe {
             let result = ffi::rack_au_plugin_is_initialized(self.inner.as_ptr());
             result != 0
+        }
+    }
+}
+
+// Additional methods not in PluginInstance trait
+impl AudioUnitPlugin {
+    /// Get the number of factory presets
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of factory presets available, or 0 if the plugin has no presets
+    /// or is not initialized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    /// let count = plugin.preset_count();
+    /// println!("Plugin has {} factory presets", count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn preset_count(&self) -> usize {
+        if !self.is_initialized() {
+            return 0;
+        }
+
+        unsafe {
+            let count = ffi::rack_au_plugin_get_preset_count(self.inner.as_ptr());
+            if count < 0 {
+                0
+            } else {
+                count as usize
+            }
+        }
+    }
+
+    /// Get information about a preset by index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Preset index (0 to preset_count() - 1)
+    ///
+    /// # Returns
+    ///
+    /// Returns `PresetInfo` containing the preset name and number
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The index is out of bounds
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    /// for i in 0..plugin.preset_count() {
+    ///     let preset = plugin.preset_info(i)?;
+    ///     println!("[{}] {}", i, preset.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn preset_info(&self, index: usize) -> Result<PresetInfo> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            let mut name = vec![0i8; 256];
+            let mut preset_number: i32 = 0;
+
+            let result = ffi::rack_au_plugin_get_preset_info(
+                self.inner.as_ptr(),
+                index as u32,
+                name.as_mut_ptr(),
+                name.len(),
+                &mut preset_number,
+            );
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            // Convert name to String
+            let name_cstr = std::ffi::CStr::from_ptr(name.as_ptr());
+            let name_str = name_cstr
+                .to_str()
+                .map_err(|e| Error::Other(format!("Invalid UTF-8 in preset name: {}", e)))?
+                .to_string();
+
+            Ok(PresetInfo {
+                index,
+                name: name_str,
+                preset_number,
+            })
+        }
+    }
+
+    /// Load a factory preset
+    ///
+    /// # Arguments
+    ///
+    /// * `preset_number` - The preset number from `preset_info().preset_number`
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The preset number is invalid
+    /// - The AudioUnit fails to load the preset
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    ///
+    /// // Load first preset
+    /// if plugin.preset_count() > 0 {
+    ///     let preset = plugin.preset_info(0)?;
+    ///     plugin.load_preset(preset.preset_number)?;
+    ///     println!("Loaded preset: {}", preset.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_preset(&mut self, preset_number: i32) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            let result = ffi::rack_au_plugin_load_preset(self.inner.as_ptr(), preset_number);
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
+        }
+    }
+
+    /// Get the full plugin state (including parameters, preset, etc.)
+    ///
+    /// This serializes the complete plugin state to a byte vector, which can be saved
+    /// to disk or stored in memory. The state can later be restored with `set_state()`.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Vec<u8>` containing the serialized plugin state
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The AudioUnit fails to serialize its state
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    ///
+    /// // Save state
+    /// let state = plugin.get_state()?;
+    /// std::fs::write("plugin_state.bin", &state)?;
+    ///
+    /// // Later: restore state
+    /// let state = std::fs::read("plugin_state.bin")?;
+    /// plugin.set_state(&state)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_state(&self) -> Result<Vec<u8>> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            // Get state size
+            let size = ffi::rack_au_plugin_get_state_size(self.inner.as_ptr());
+            if size <= 0 {
+                return Err(Error::Other("Failed to get plugin state size".to_string()));
+            }
+
+            // Allocate buffer
+            let mut data = vec![0u8; size as usize];
+            let mut actual_size = data.len();
+
+            // Get state data
+            let result = ffi::rack_au_plugin_get_state(
+                self.inner.as_ptr(),
+                data.as_mut_ptr(),
+                &mut actual_size,
+            );
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            // Resize to actual size (in case it's smaller than allocated)
+            data.resize(actual_size, 0);
+
+            Ok(data)
+        }
+    }
+
+    /// Set the full plugin state (including parameters, preset, etc.)
+    ///
+    /// This restores the complete plugin state from a byte buffer previously obtained
+    /// from `get_state()`. All parameters, preset selection, and other state will be restored.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - State data from a previous `get_state()` call
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The state data is invalid or corrupted
+    /// - The AudioUnit fails to restore the state
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    ///
+    /// // Save current state
+    /// let state = plugin.get_state()?;
+    ///
+    /// // Make some changes...
+    /// plugin.set_parameter(0, 0.75)?;
+    ///
+    /// // Restore original state
+    /// plugin.set_state(&state)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        if data.is_empty() {
+            return Err(Error::Other("State data is empty".to_string()));
+        }
+
+        unsafe {
+            let result = ffi::rack_au_plugin_set_state(
+                self.inner.as_ptr(),
+                data.as_ptr(),
+                data.len(),
+            );
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
         }
     }
 }
@@ -991,5 +1284,256 @@ mod tests {
         assert!(result.is_ok(), "Failed to send MIDI events with sample offsets");
 
         println!("✓ MIDI events with sample offsets sent successfully");
+    }
+
+    // ============================================================================
+    // Preset Tests
+    // ============================================================================
+
+    #[test]
+    fn test_preset_count() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing preset count with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.preset_count();
+        println!("  Found {} presets", count);
+
+        // Verify preset_count doesn't panic (some plugins have 0 presets, which is valid)
+    }
+
+    #[test]
+    fn test_preset_info() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing preset info with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.preset_count();
+        if count == 0 {
+            println!("  Plugin has no presets, skipping test");
+            return;
+        }
+
+        // Get info for first preset
+        let preset_info = plugin
+            .preset_info(0)
+            .expect("Failed to get preset info");
+
+        println!("  Preset 0: {}", preset_info.name);
+        println!("    Preset number: {}", preset_info.preset_number);
+
+        assert!(!preset_info.name.is_empty(), "Preset name should not be empty");
+        assert_eq!(preset_info.index, 0);
+    }
+
+    #[test]
+    fn test_load_preset() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing load preset with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.preset_count();
+        if count == 0 {
+            println!("  Plugin has no presets, skipping test");
+            return;
+        }
+
+        // Get first preset info
+        let preset = plugin.preset_info(0).expect("Failed to get preset info");
+
+        // Load the preset
+        plugin
+            .load_preset(preset.preset_number)
+            .expect("Failed to load preset");
+
+        println!("  ✓ Loaded preset: {}", preset.name);
+    }
+
+    #[test]
+    fn test_state_round_trip() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing state round-trip with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Save original state
+        let original_state = plugin.get_state().expect("Failed to get state");
+        println!("  Original state size: {} bytes", original_state.len());
+
+        // Modify plugin state (if it has parameters)
+        let param_count = plugin.parameter_count();
+        let original_param_value = if param_count > 0 {
+            let value = plugin.get_parameter(0).expect("Failed to get parameter");
+            // Change parameter
+            plugin
+                .set_parameter(0, 0.99)
+                .expect("Failed to set parameter");
+
+            let new_value = plugin.get_parameter(0).expect("Failed to get parameter");
+            println!("  Modified parameter 0: {} -> {}", value, new_value);
+            Some(value)
+        } else {
+            None
+        };
+
+        // Restore state
+        plugin
+            .set_state(&original_state)
+            .expect("Failed to restore state");
+
+        println!("  ✓ State restored");
+
+        // Verify parameter was restored (if plugin has parameters)
+        if let Some(expected_value) = original_param_value {
+            let restored_value = plugin.get_parameter(0).expect("Failed to get parameter");
+            assert!(
+                (restored_value - expected_value).abs() < 0.01,
+                "Parameter not restored correctly (expected {}, got {})",
+                expected_value,
+                restored_value
+            );
+            println!("  ✓ Parameter restored to: {}", restored_value);
+        }
+    }
+
+    #[test]
+    fn test_preset_out_of_bounds() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.preset_count();
+        if count == 0 {
+            println!("Plugin has no presets, skipping test");
+            return;
+        }
+
+        // Try to access preset beyond count
+        let result = plugin.preset_info(count + 10);
+        assert!(result.is_err(), "Should fail for out-of-bounds index");
+
+        println!("✓ Out-of-bounds preset index rejected");
+    }
+
+    #[test]
+    fn test_preset_before_init() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        // Don't initialize - test pre-init behavior
+
+        // All operations should return 0 or fail gracefully before initialization
+        let count = plugin.preset_count();
+        assert_eq!(count, 0, "Preset count should be 0 before initialization");
+
+        let result = plugin.preset_info(0);
+        assert!(result.is_err(), "preset_info should fail before init");
+
+        println!("✓ Preset operations correctly fail before initialization");
+    }
+
+    #[test]
+    fn test_state_empty_data() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Try to set empty state
+        let result = plugin.set_state(&[]);
+        assert!(result.is_err(), "Should reject empty state data");
+
+        println!("✓ Empty state data rejected");
+    }
+
+    #[test]
+    fn test_state_before_init() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        // Don't initialize
+
+        let result = plugin.get_state();
+        assert!(result.is_err(), "get_state should fail before init");
+
+        println!("✓ State operations correctly fail before initialization");
+    }
+
+    #[test]
+    fn test_multiple_presets() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.preset_count();
+        if count < 2 {
+            println!("Plugin has {} presets, skipping multi-preset test", count);
+            return;
+        }
+
+        println!("Testing with {} presets", count);
+
+        // Load several presets and verify they each work
+        for i in 0..count.min(3) {
+            let preset = plugin.preset_info(i).expect("Failed to get preset info");
+            plugin
+                .load_preset(preset.preset_number)
+                .expect("Failed to load preset");
+            println!("  ✓ Loaded preset {}: {}", i, preset.name);
+        }
     }
 }

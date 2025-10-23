@@ -263,6 +263,116 @@ extern "C" {
     ) -> c_int;
 
     // ============================================================================
+    // Preset Management API
+    // ============================================================================
+
+    /// Get factory preset count
+    ///
+    /// # Returns
+    ///
+    /// - Number of factory presets (>= 0)
+    /// - 0 if plugin has no presets
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    pub fn rack_au_plugin_get_preset_count(plugin: *mut RackAUPlugin) -> c_int;
+
+    /// Get preset info by index
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success (name and preset_number written to output pointers)
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    /// - `index` must be less than preset count
+    /// - `name` must point to a buffer with at least `name_size` bytes
+    /// - `preset_number` must be a valid pointer to an i32
+    /// - `name` will be null-terminated
+    /// - `name_size` should be at least 256 bytes for typical preset names
+    pub fn rack_au_plugin_get_preset_info(
+        plugin: *mut RackAUPlugin,
+        index: u32,
+        name: *mut c_char,
+        name_size: usize,
+        preset_number: *mut i32,
+    ) -> c_int;
+
+    /// Load a factory preset by preset number
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    /// - `preset_number` should be a valid preset number from get_preset_info
+    pub fn rack_au_plugin_load_preset(plugin: *mut RackAUPlugin, preset_number: i32) -> c_int;
+
+    /// Get plugin state size (for allocation)
+    ///
+    /// # Returns
+    ///
+    /// - Size in bytes needed to store state (> 0)
+    /// - 0 if state cannot be retrieved
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    pub fn rack_au_plugin_get_state_size(plugin: *mut RackAUPlugin) -> c_int;
+
+    /// Get plugin state (full state including parameters, preset, etc.)
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success (state written to data buffer, actual size written to size pointer)
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    /// - `data` must point to a buffer with at least `*size` bytes
+    /// - `size` must be a valid pointer to a size_t
+    /// - On input, `*size` is the buffer size
+    /// - On output, `*size` is the actual size written
+    /// - Typical usage: call get_state_size() first, allocate buffer, then call get_state()
+    pub fn rack_au_plugin_get_state(
+        plugin: *mut RackAUPlugin,
+        data: *mut u8,
+        size: *mut usize,
+    ) -> c_int;
+
+    /// Set plugin state (restore full state including parameters, preset, etc.)
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    /// - `data` must point to valid state data (from previous get_state call)
+    /// - `data` must remain valid for the duration of the call
+    /// - `size` must be the size of the state data in bytes
+    pub fn rack_au_plugin_set_state(
+        plugin: *mut RackAUPlugin,
+        data: *const u8,
+        size: usize,
+    ) -> c_int;
+
+    // ============================================================================
     // MIDI API
     // ============================================================================
 
