@@ -241,6 +241,9 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     // Input buffer (for providing audio to effect plugins)
     size_t buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * 2);
     plugin->input_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
+    if (!plugin->input_buffer_list) {
+        return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
+    }
     plugin->input_buffer_list->mNumberBuffers = 2;  // Stereo only
 
     size_t buffer_size = max_block_size * sizeof(float);
@@ -248,16 +251,48 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         plugin->input_buffer_list->mBuffers[i].mNumberChannels = 1;
         plugin->input_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
         plugin->input_buffer_list->mBuffers[i].mData = malloc(buffer_size);
+        if (!plugin->input_buffer_list->mBuffers[i].mData) {
+            // Clean up partially allocated buffers
+            for (UInt32 j = 0; j < i; j++) {
+                free(plugin->input_buffer_list->mBuffers[j].mData);
+            }
+            free(plugin->input_buffer_list);
+            plugin->input_buffer_list = nullptr;
+            return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
+        }
     }
 
     // Output buffer (for receiving audio from the plugin)
     plugin->output_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
+    if (!plugin->output_buffer_list) {
+        // Clean up input buffers
+        for (UInt32 i = 0; i < 2; i++) {
+            free(plugin->input_buffer_list->mBuffers[i].mData);
+        }
+        free(plugin->input_buffer_list);
+        plugin->input_buffer_list = nullptr;
+        return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
+    }
     plugin->output_buffer_list->mNumberBuffers = 2;
 
     for (UInt32 i = 0; i < 2; i++) {
         plugin->output_buffer_list->mBuffers[i].mNumberChannels = 1;
         plugin->output_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
         plugin->output_buffer_list->mBuffers[i].mData = malloc(buffer_size);
+        if (!plugin->output_buffer_list->mBuffers[i].mData) {
+            // Clean up all allocated buffers
+            for (UInt32 j = 0; j < i; j++) {
+                free(plugin->output_buffer_list->mBuffers[j].mData);
+            }
+            free(plugin->output_buffer_list);
+            for (UInt32 j = 0; j < 2; j++) {
+                free(plugin->input_buffer_list->mBuffers[j].mData);
+            }
+            free(plugin->input_buffer_list);
+            plugin->input_buffer_list = nullptr;
+            plugin->output_buffer_list = nullptr;
+            return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
+        }
     }
 
     // Set up input render callback (for effect plugins)
