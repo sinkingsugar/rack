@@ -104,10 +104,21 @@
 - `examples/control_parameters.rs` - Complete parameter control demonstration
 
 **Test Results**:
-- 25/25 Rust tests passing (added 5 parameter tests)
+- 29/29 Rust tests passing (added 9 parameter tests total)
 - 5/5 C++ tests passing (added parameter operations test)
 - 4/4 doctests passing
 - All examples working (including new control_parameters example)
+
+**Performance Improvements**:
+- Parameter info caching eliminates ~67% of API calls during automation
+- Fast path uses cached info, falls back to on-demand queries
+- Critical for real-time parameter automation scenarios
+
+**Additional Enhancements**:
+- Parameter unit support (Hz, dB, %, cents, etc.) - 27 unit types
+- Thread-safety documentation (Send-but-not-Sync model)
+- Parameter range validation and edge case handling
+- CFString memory management documentation with Apple docs reference
 
 ---
 
@@ -169,98 +180,154 @@ Tasks:
 
 ## 🎯 Immediate Next Steps
 
-**Start Here** (Phase 5 - Parameter Control):
+**Start Here** (Phase 6 - MIDI Support):
 
-### 1. Implement C++ Parameter Functions
+### Goal
+Enable sending MIDI events to AudioUnit instrument plugins for note playback and control changes.
+
+### 1. Implement C++ MIDI Functions
+
+**File**: `rack-sys/include/rack_au.h`
+
+```cpp
+// MIDI event types
+typedef enum {
+    RACK_AU_MIDI_NOTE_ON = 0x90,
+    RACK_AU_MIDI_NOTE_OFF = 0x80,
+    RACK_AU_MIDI_CONTROL_CHANGE = 0xB0,
+    RACK_AU_MIDI_PROGRAM_CHANGE = 0xC0,
+} RackAUMidiEventType;
+
+// MIDI event struct
+typedef struct {
+    uint32_t sample_offset;  // Sample offset within buffer
+    uint8_t status;          // MIDI status byte
+    uint8_t data1;           // First data byte (note/CC number)
+    uint8_t data2;           // Second data byte (velocity/value)
+    uint8_t channel;         // MIDI channel (0-15)
+} RackAUMidiEvent;
+
+// Send MIDI events to plugin
+int rack_au_plugin_send_midi(
+    RackAUPlugin* plugin,
+    const RackAUMidiEvent* events,
+    uint32_t event_count
+);
+```
 
 **File**: `rack-sys/src/au_instance.cpp`
 
-```cpp
-// Add to rack_au.h
-extern "C" {
-    int rack_au_plugin_parameter_count(RackAUPlugin* plugin);
-
-    int rack_au_plugin_parameter_info(
-        RackAUPlugin* plugin,
-        uint32_t index,
-        char* name_out,
-        uint32_t name_len,
-        float* min_value,
-        float* max_value,
-        float* default_value
-    );
-
-    int rack_au_plugin_get_parameter(
-        RackAUPlugin* plugin,
-        uint32_t index,
-        float* value_out
-    );
-
-    int rack_au_plugin_set_parameter(
-        RackAUPlugin* plugin,
-        uint32_t index,
-        float value
-    );
-}
-```
-
 Implementation steps:
-1. Query `kAudioUnitProperty_ParameterList` for parameter count
-2. Query `kAudioUnitProperty_ParameterInfo` for each parameter
-3. Use `AudioUnitGetParameter()` for getting values
-4. Use `AudioUnitSetParameter()` for setting values
-5. Handle parameter scope (global/input/output)
-6. Normalize values to 0.0-1.0 range
+1. Use `MusicDeviceMIDIEvent()` for simple note on/off
+2. Handle MIDI channel routing
+3. Support sample-accurate timing with `AudioUnitRender` timestamps
+4. Queue MIDI events for next `process()` call
+5. Handle polyphony and note stealing
 
 ### 2. Add FFI Bindings
 
 **File**: `src/au/ffi.rs`
 
-Add extern declarations for parameter functions.
+```rust
+#[repr(C)]
+pub struct RackAUMidiEvent {
+    pub sample_offset: u32,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+    pub channel: u8,
+}
 
-### 3. Update Rust Wrapper
+extern "C" {
+    pub fn rack_au_plugin_send_midi(
+        plugin: *mut RackAUPlugin,
+        events: *const RackAUMidiEvent,
+        event_count: u32,
+    ) -> c_int;
+}
+```
 
-**File**: `src/au/instance.rs`
+### 3. Create Safe Rust API
 
-Implement `PluginInstance` trait methods:
-- `parameter_count()` - already in trait
-- `parameter_info(index)` - already in trait
-- `get_parameter(index)` - already in trait
-- `set_parameter(index, value)` - already in trait
+**File**: `src/midi.rs` (new file)
+
+```rust
+pub struct MidiEvent {
+    pub sample_offset: u32,
+    pub kind: MidiEventKind,
+}
+
+pub enum MidiEventKind {
+    NoteOn { note: u8, velocity: u8, channel: u8 },
+    NoteOff { note: u8, velocity: u8, channel: u8 },
+    ControlChange { controller: u8, value: u8, channel: u8 },
+    ProgramChange { program: u8, channel: u8 },
+}
+```
+
+**Update `src/traits.rs`**:
+```rust
+fn send_midi(&mut self, events: &[MidiEvent]) -> Result<()>;
+```
 
 ### 4. Add Tests
 
 **C++ tests** (`rack-sys/test/test_instance.cpp`):
 ```cpp
-void test_parameter_enumeration();
-void test_parameter_get_set();
-void test_parameter_out_of_bounds();
+void test_midi_note_on_off();
+void test_midi_control_change();
+void test_midi_timing();
+void test_midi_polyphony();
 ```
 
 **Rust tests** (`src/au/instance.rs`):
 ```rust
 #[test]
-fn test_parameter_count();
+fn test_send_midi_note();
 
 #[test]
-fn test_parameter_info();
+fn test_send_midi_cc();
 
 #[test]
-fn test_get_set_parameter();
-
-#[test]
-fn test_parameter_range_validation();
+fn test_midi_event_timing();
 ```
 
 ### 5. Create Example
 
-**File**: `examples/control_parameters.rs`
+**File**: `examples/simple_synth.rs`
 
-Demonstrate:
-- Listing all parameters
-- Getting current values
-- Setting new values
-- Parameter name/range display
+```rust
+use rack::prelude::*;
+use rack::midi::*;
+
+fn main() -> Result<()> {
+    let scanner = Scanner::new()?;
+    let plugins = scanner.scan()?;
+
+    // Find an instrument plugin
+    let synth = plugins.iter()
+        .find(|p| p.plugin_type == PluginType::Instrument)
+        .expect("No instrument plugins found");
+
+    let mut plugin = scanner.load(synth)?;
+    plugin.initialize(48000.0, 512)?;
+
+    // Play a C major chord
+    let events = vec![
+        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 60, velocity: 100, channel: 0 }},
+        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 64, velocity: 100, channel: 0 }},
+        MidiEvent { sample_offset: 0, kind: MidiEventKind::NoteOn { note: 67, velocity: 100, channel: 0 }},
+    ];
+
+    plugin.send_midi(&events)?;
+
+    // Process audio to render the notes
+    let mut output = AudioBuffer::new(512 * 2);
+    plugin.process(&AudioBuffer::new(512 * 2), &mut output)?;
+
+    Ok(())
+}
+```
 
 ### Commands
 
@@ -275,90 +342,53 @@ cd ~/devel/rack
 cargo test
 
 # Run example
-cargo run --example control_parameters
-
-# Expected output:
-# Parameters:
-#   [0] Frequency: 440.00 Hz (20.00 - 20000.00)
-#   [1] Resonance: 0.50 (0.00 - 1.00)
-#   ...
-# Set parameter 0 to 0.75
-# New value: 15005.00 Hz
+cargo run --example simple_synth
 ```
 
 ---
 
-## 📝 Implementation Notes
+## 📝 MIDI Implementation Notes
 
-### Parameter Normalization
+### AudioUnit MIDI API
 
-AudioUnit parameters have different ranges (e.g., frequency 20-20000 Hz, resonance 0-1). The API normalizes all parameters to 0.0-1.0:
+AudioUnit provides two main methods for MIDI:
+1. **MusicDeviceMIDIEvent()** - Simple, immediate MIDI events
+2. **Render callback with MIDI** - Sample-accurate timing
 
-```rust
-// Internal conversion
-normalized = (value - min) / (max - min);
-actual = min + (normalized * (max - min));
-```
+Start with MusicDeviceMIDIEvent for simplicity.
 
-### Thread Safety
+### Sample-Accurate Timing
 
-Parameter changes should be thread-safe and can be called from any thread. However:
-- Parameter changes during `process()` are safe but may cause audio glitches
-- Consider implementing parameter smoothing in future
-- Document that `process()` itself is still !Sync
+For proper timing:
+- Queue MIDI events with sample offsets
+- Send events during `AudioUnitRender` callback
+- Respect buffer boundaries
 
-### Parameter Types
+### Polyphony Handling
 
-AudioUnit parameters can have different types:
-- Generic (continuous float)
-- Indexed (discrete selection)
-- Boolean (on/off)
-- String (text input)
-
-Start with generic parameters, add others in future phases.
+- AudioUnit handles polyphony internally
+- No need to track voice allocation
+- Some plugins have polyphony limits
 
 ### Testing Strategy
 
-1. **Unit tests**: Test parameter functions in isolation
-2. **Integration tests**: Test with real AudioUnit plugins
-3. **Example**: Interactive demonstration
-4. **Manual testing**: Verify parameter changes affect audio output
-
----
-
-## 🔍 Design Decisions
-
-### Why Normalize Parameters?
-
-- **Consistency**: All parameters use same 0.0-1.0 range regardless of actual units
-- **Automation**: Easier to automate without knowing parameter ranges
-- **UI**: Simpler to build generic parameter controls
-- **Serialization**: Normalized values are more portable
-
-### Why Start with Get/Set?
-
-Before implementing automation, presets, or MIDI CC mapping, we need basic get/set functionality. This is the foundation for all advanced features.
-
-### Thread Safety Model
-
-- Parameters can be changed from any thread (Send)
-- But not from multiple threads simultaneously (!Sync)
-- This matches the AudioUnit API design
+1. **Unit tests**: Test MIDI event conversion
+2. **Integration tests**: Test with real instrument plugins
+3. **Manual testing**: Verify note playback sounds correct
 
 ---
 
 ## 📚 Resources
 
-### AudioUnit Documentation
-- [Audio Unit Programming Guide - Parameters](https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/AudioUnitProgrammingGuide/TheAudioUnit/TheAudioUnit.html#//apple_ref/doc/uid/TP40003278-CH12-SW18)
-- [AudioUnitProperties.h](https://developer.apple.com/documentation/audiounit/audiounitpropertyid)
+### AudioUnit MIDI Documentation
+- [Music Device Properties](https://developer.apple.com/documentation/audiounit/music_effects)
+- [MusicDeviceMIDIEvent Reference](https://developer.apple.com/documentation/audiounit/musicdevicemidievent)
+- [Core MIDI Overview](https://developer.apple.com/documentation/coremidi)
 
-### Current Implementation
-- C++ implementation: `rack-sys/src/au_instance.cpp`
-- Rust wrapper: `src/au/instance.rs`
-- Trait definition: `src/traits.rs`
-- Examples: `examples/process_audio.rs`
-
-### Test Coverage
-- Current: 20 Rust tests, 4 C++ tests
-- Target: Add 8+ parameter tests (4 C++, 4+ Rust)
+### Success Criteria
+- [ ] Send note on/off to instrument plugins
+- [ ] Control change (CC) support
+- [ ] Sample-accurate timing
+- [ ] All tests passing (C++ and Rust)
+- [ ] Example demonstrates chord playback
+- [ ] No MIDI message loss or corruption
