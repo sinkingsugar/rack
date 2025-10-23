@@ -389,11 +389,12 @@ void test_parameter_operations() {
 
     // Test parameter info
     char name[256];
+    char unit[32];
     float min_val = 0.0f;
     float max_val = 0.0f;
     float default_val = 0.0f;
 
-    result = rack_au_plugin_parameter_info(plugin, 0, name, sizeof(name), &min_val, &max_val, &default_val);
+    result = rack_au_plugin_parameter_info(plugin, 0, name, sizeof(name), &min_val, &max_val, &default_val, unit, sizeof(unit));
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Failed to get parameter info (error: " << result << ")\n";
         rack_au_plugin_free(plugin);
@@ -402,7 +403,11 @@ void test_parameter_operations() {
         return;
     }
 
-    std::cout << "  Parameter 0: " << name << "\n";
+    std::cout << "  Parameter 0: " << name;
+    if (unit[0] != '\0') {
+        std::cout << " (" << unit << ")";
+    }
+    std::cout << "\n";
     std::cout << "    Range: " << min_val << " - " << max_val << "\n";
     std::cout << "    Default: " << default_val << "\n";
     std::cout << "PASS: Parameter info retrieved\n";

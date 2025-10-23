@@ -67,7 +67,11 @@ fn main() -> Result<()> {
             let param = plugin.parameter_info(i)?;
             let value = plugin.get_parameter(i)?;
 
-            println!("[{}] {}", i, param.name);
+            print!("[{}] {}", i, param.name);
+            if !param.unit.is_empty() {
+                print!(" ({})", param.unit);
+            }
+            println!();
             println!("    Range: {:.2} - {:.2}", param.min, param.max);
             println!("    Default: {:.2}", param.default);
             println!("    Current: {:.2} (normalized: {:.4})",

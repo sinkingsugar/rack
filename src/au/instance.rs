@@ -114,6 +114,7 @@ impl PluginInstance for AudioUnitPlugin {
 
         unsafe {
             let mut name = vec![0i8; 256];
+            let mut unit = vec![0i8; 32];
             let mut min = 0.0f32;
             let mut max = 0.0f32;
             let mut default_value = 0.0f32;
@@ -126,6 +127,8 @@ impl PluginInstance for AudioUnitPlugin {
                 &mut min,
                 &mut max,
                 &mut default_value,
+                unit.as_mut_ptr(),
+                unit.len(),
             );
 
             if result != ffi::RACK_AU_OK {
@@ -139,13 +142,20 @@ impl PluginInstance for AudioUnitPlugin {
                 .map_err(|e| Error::Other(format!("Invalid UTF-8 in parameter name: {}", e)))?
                 .to_string();
 
+            // Convert unit to String
+            let unit_cstr = std::ffi::CStr::from_ptr(unit.as_ptr());
+            let unit_str = unit_cstr
+                .to_str()
+                .map_err(|e| Error::Other(format!("Invalid UTF-8 in parameter unit: {}", e)))?
+                .to_string();
+
             Ok(ParameterInfo {
                 index,
                 name: name_str,
                 min,
                 max,
                 default: default_value,
-                unit: String::new(), // TODO: Query unit from AudioUnit
+                unit: unit_str,
             })
         }
     }
@@ -512,5 +522,32 @@ mod tests {
 
         let result = plugin.parameter_info(count + 10);
         assert!(result.is_err(), "Should fail for out-of-bounds index");
+    }
+
+    #[test]
+    fn test_parameter_unit_strings() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            println!("Plugin has no parameters, skipping test");
+            return;
+        }
+
+        // Check that we can retrieve unit strings
+        for i in 0..count {
+            let param = plugin.parameter_info(i).expect("Failed to get parameter info");
+            // Unit string may be empty (generic parameter) or contain a unit
+            // Just verify it doesn't panic and returns a valid String
+            println!("Parameter {} unit: '{}'", i, param.unit);
+        }
     }
 }
