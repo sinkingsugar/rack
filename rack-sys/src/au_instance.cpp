@@ -2,6 +2,7 @@
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
+#include <cstdio>  // for sscanf
 
 // Internal plugin state
 struct RackAUPlugin {
@@ -16,21 +17,63 @@ struct RackAUPlugin {
 // Plugin Instance Implementation
 // ============================================================================
 
+// Parse unique_id format: "type-subtype-manufacturer" (all hex)
+// Example: "61756678-64796e78-4170706c" (aufx-dynx-Appl)
+static bool parse_unique_id(const char* unique_id, AudioComponentDescription* desc) {
+    if (!unique_id || !desc) {
+        return false;
+    }
+
+    unsigned int type = 0, subtype = 0, manufacturer = 0;
+    int matched = sscanf(unique_id, "%x-%x-%x", &type, &subtype, &manufacturer);
+
+    if (matched != 3) {
+        return false;
+    }
+
+    desc->componentType = type;
+    desc->componentSubType = subtype;
+    desc->componentManufacturer = manufacturer;
+    desc->componentFlags = 0;
+    desc->componentFlagsMask = 0;
+
+    return true;
+}
+
 RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     if (!unique_id) {
         return nullptr;
     }
-    
+
     RackAUPlugin* plugin = new RackAUPlugin();
     plugin->audio_unit = nullptr;
     plugin->initialized = false;
     plugin->sample_rate = 0.0;
     plugin->max_block_size = 0;
     strncpy(plugin->unique_id, unique_id, sizeof(plugin->unique_id) - 1);
-    
-    // TODO: Parse unique_id and find the AudioComponent
-    // For now, just create the struct
-    
+    plugin->unique_id[sizeof(plugin->unique_id) - 1] = '\0';
+
+    // Parse unique_id to get component description
+    AudioComponentDescription desc;
+    if (!parse_unique_id(unique_id, &desc)) {
+        delete plugin;
+        return nullptr;
+    }
+
+    // Find the AudioComponent
+    AudioComponent component = AudioComponentFindNext(nullptr, &desc);
+    if (!component) {
+        delete plugin;
+        return nullptr;
+    }
+
+    // Create the AudioComponentInstance
+    OSStatus status = AudioComponentInstanceNew(component, &plugin->audio_unit);
+    if (status != noErr || !plugin->audio_unit) {
+        delete plugin;
+        return nullptr;
+    }
+
     return plugin;
 }
 
@@ -51,20 +94,79 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     if (!plugin) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
-    
+
+    if (!plugin->audio_unit) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
     if (plugin->initialized) {
         return RACK_AU_OK;  // Already initialized
     }
-    
+
     plugin->sample_rate = sample_rate;
     plugin->max_block_size = max_block_size;
-    
-    // TODO: Implement actual AudioUnit initialization
-    // 1. Find AudioComponent from unique_id
-    // 2. AudioComponentInstanceNew
-    // 3. Set stream format
-    // 4. AudioUnitInitialize
-    
+
+    // Set up audio stream format (stereo, interleaved, 32-bit float)
+    AudioStreamBasicDescription format;
+    memset(&format, 0, sizeof(format));
+    format.mSampleRate = sample_rate;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+    format.mBitsPerChannel = 32;
+    format.mChannelsPerFrame = 2;  // Stereo
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float) * 2;  // 2 channels interleaved
+    format.mBytesPerPacket = format.mBytesPerFrame * format.mFramesPerPacket;
+
+    // Try to set the format on both input and output scopes
+    // Different plugin types support different scopes, so we try both
+    OSStatus status_input = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_StreamFormat,
+        kAudioUnitScope_Input,
+        0,  // Element 0
+        &format,
+        sizeof(format)
+    );
+
+    OSStatus status_output = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_StreamFormat,
+        kAudioUnitScope_Output,
+        0,  // Element 0
+        &format,
+        sizeof(format)
+    );
+
+    // At least one scope should succeed for the plugin to be usable
+    // Some plugins (instruments) don't have input, others don't have output configured
+    // We'll be permissive here and just warn if both fail
+    if (status_input != noErr && status_output != noErr) {
+        // Both failed - this might be a problem, but let's try to continue
+        // Some plugins might not need explicit format setting
+    }
+
+    // Set maximum frames per slice
+    UInt32 max_frames = max_block_size;
+    OSStatus status = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_MaximumFramesPerSlice,
+        kAudioUnitScope_Global,
+        0,
+        &max_frames,
+        sizeof(max_frames)
+    );
+
+    if (status != noErr) {
+        // MaximumFramesPerSlice might not be supported by all plugins, continue anyway
+    }
+
+    // Initialize the AudioUnit
+    status = AudioUnitInitialize(plugin->audio_unit);
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
     plugin->initialized = true;
     return RACK_AU_OK;
 }

@@ -51,11 +51,18 @@ install(DIRECTORY include/
     DESTINATION include
 )
 
-# Optional: Build a test executable
-option(BUILD_TESTS "Build test executable" OFF)
+# Optional: Build test executables
+option(BUILD_TESTS "Build test executables" OFF)
 if(BUILD_TESTS)
-    add_executable(rack_sys_test
+    # Scanner test
+    add_executable(rack_sys_test_scanner
         test/test_scanner.cpp
     )
-    target_link_libraries(rack_sys_test PRIVATE rack_sys)
+    target_link_libraries(rack_sys_test_scanner PRIVATE rack_sys)
+
+    # Instance test
+    add_executable(rack_sys_test_instance
+        test/test_instance.cpp
+    )
+    target_link_libraries(rack_sys_test_instance PRIVATE rack_sys)
 endif()
