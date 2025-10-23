@@ -8,6 +8,10 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>  // SSE2
+#endif
+
 // Internal plugin state
 struct RackAUPlugin {
     AudioComponentInstance audio_unit;
@@ -65,7 +69,7 @@ static OSStatus input_render_callback(
         const float* interleaved = plugin->current_input;
 
 #ifdef __ARM_NEON
-        // SIMD-optimized deinterleaving: process 4 frames at a time
+        // ARM NEON: SIMD-optimized deinterleaving, process 4 frames at a time
         UInt32 i = 0;
         UInt32 simd_frames = (inNumberFrames / 4) * 4;
         for (; i < simd_frames; i += 4) {
@@ -78,8 +82,30 @@ static OSStatus input_render_callback(
             left_out[i] = interleaved[i * 2];
             right_out[i] = interleaved[i * 2 + 1];
         }
+#elif defined(__x86_64__) || defined(_M_X64)
+        // x86_64 SSE2: SIMD-optimized deinterleaving, process 4 frames at a time
+        UInt32 i = 0;
+        UInt32 simd_frames = (inNumberFrames / 4) * 4;
+        for (; i < simd_frames; i += 4) {
+            // Load 8 floats: L0 R0 L1 R1 L2 R2 L3 R3
+            __m128 pair0 = _mm_loadu_ps(&interleaved[i * 2]);      // L0 R0 L1 R1
+            __m128 pair1 = _mm_loadu_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
+
+            // Shuffle to extract left: L0 L1 L2 L3
+            __m128 left = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(2, 0, 2, 0));
+            // Shuffle to extract right: R0 R1 R2 R3
+            __m128 right = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(3, 1, 3, 1));
+
+            _mm_storeu_ps(&left_out[i], left);
+            _mm_storeu_ps(&right_out[i], right);
+        }
+        // Handle remaining frames (scalar fallback)
+        for (; i < inNumberFrames; i++) {
+            left_out[i] = interleaved[i * 2];
+            right_out[i] = interleaved[i * 2 + 1];
+        }
 #else
-        // Scalar fallback for non-ARM platforms
+        // Scalar fallback for other platforms
         for (UInt32 i = 0; i < inNumberFrames; i++) {
             left_out[i] = interleaved[i * 2];
             right_out[i] = interleaved[i * 2 + 1];
@@ -417,7 +443,7 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
         const float* right_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[1].mData);
 
 #ifdef __ARM_NEON
-        // SIMD-optimized interleaving: process 4 frames at a time
+        // ARM NEON: SIMD-optimized interleaving, process 4 frames at a time
         uint32_t i = 0;
         uint32_t simd_frames = (frames / 4) * 4;
         for (; i < simd_frames; i += 4) {
@@ -431,8 +457,30 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
             output[i * 2] = left_in[i];
             output[i * 2 + 1] = right_in[i];
         }
+#elif defined(__x86_64__) || defined(_M_X64)
+        // x86_64 SSE2: SIMD-optimized interleaving, process 4 frames at a time
+        uint32_t i = 0;
+        uint32_t simd_frames = (frames / 4) * 4;
+        for (; i < simd_frames; i += 4) {
+            // Load 4 left and 4 right samples
+            __m128 left = _mm_loadu_ps(&left_in[i]);   // L0 L1 L2 L3
+            __m128 right = _mm_loadu_ps(&right_in[i]); // R0 R1 R2 R3
+
+            // Interleave low half: L0 R0 L1 R1
+            __m128 low = _mm_unpacklo_ps(left, right);
+            // Interleave high half: L2 R2 L3 R3
+            __m128 high = _mm_unpackhi_ps(left, right);
+
+            _mm_storeu_ps(&output[i * 2], low);
+            _mm_storeu_ps(&output[i * 2 + 4], high);
+        }
+        // Handle remaining frames (scalar fallback)
+        for (; i < frames; i++) {
+            output[i * 2] = left_in[i];
+            output[i * 2 + 1] = right_in[i];
+        }
 #else
-        // Scalar fallback for non-ARM platforms
+        // Scalar fallback for other platforms
         for (uint32_t i = 0; i < frames; i++) {
             output[i * 2] = left_in[i];
             output[i * 2 + 1] = right_in[i];
