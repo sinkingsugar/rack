@@ -199,6 +199,12 @@
 - Two-pass state access: get size, then get data
 - CFString/CFPropertyList memory management with proper CFRelease
 
+**Code Review Fixes**:
+- CFStringGetCString return value validation (buffer overflow protection)
+- Integer overflow protection for state size (INT_MAX bounds checking)
+- RAII memory management in C++ tests (std::unique_ptr)
+- Removed strict CFPropertyList type validation (was causing SIGBUS in CI)
+
 ---
 
 ## 📋 Future Phases
