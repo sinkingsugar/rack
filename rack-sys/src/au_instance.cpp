@@ -15,7 +15,10 @@ struct RackAUPlugin {
     // Audio buffers for processing
     AudioBufferList* input_buffer_list;
     AudioBufferList* output_buffer_list;
-    const float* current_input;  // Pointer to current input for render callback
+    // Pointer to current input for render callback
+    // Thread safety: AudioUnitRender is synchronous - the callback executes
+    // on the calling thread before AudioUnitRender returns, so no race condition
+    const float* current_input;
 };
 
 // ============================================================================
@@ -38,9 +41,18 @@ static OSStatus input_render_callback(
         return noErr;
     }
 
+    // Bounds check: prevent buffer overrun if plugin requests more frames than allocated
+    if (inNumberFrames > plugin->max_block_size) {
+        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+        return kAudioUnitErr_TooManyFramesToProcess;
+    }
+
     // Copy interleaved input to non-interleaved AudioBufferList
-    // Assuming stereo (2 channels)
-    if (ioData->mNumberBuffers >= 2) {
+    // NOTE: Currently hardcoded to stereo (2 channels) - mono/surround not yet supported
+    if (ioData->mNumberBuffers >= 2 &&
+        ioData->mBuffers[0].mData &&
+        ioData->mBuffers[1].mData) {
+
         float* left_out = static_cast<float*>(ioData->mBuffers[0].mData);
         float* right_out = static_cast<float*>(ioData->mBuffers[1].mData);
         const float* interleaved = plugin->current_input;
@@ -49,6 +61,9 @@ static OSStatus input_render_callback(
             left_out[i] = interleaved[i * 2];
             right_out[i] = interleaved[i * 2 + 1];
         }
+    } else {
+        // Buffer validation failed - return silence
+        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
     }
 
     return noErr;
@@ -127,17 +142,21 @@ void rack_au_plugin_free(RackAUPlugin* plugin) {
         AudioComponentInstanceDispose(plugin->audio_unit);
     }
 
-    // Free audio buffers
+    // Free audio buffers - free ALL channels, not just buffer[0]
     if (plugin->input_buffer_list) {
-        if (plugin->input_buffer_list->mNumberBuffers > 0 && plugin->input_buffer_list->mBuffers[0].mData) {
-            free(plugin->input_buffer_list->mBuffers[0].mData);
+        for (UInt32 i = 0; i < plugin->input_buffer_list->mNumberBuffers; i++) {
+            if (plugin->input_buffer_list->mBuffers[i].mData) {
+                free(plugin->input_buffer_list->mBuffers[i].mData);
+            }
         }
         free(plugin->input_buffer_list);
     }
 
     if (plugin->output_buffer_list) {
-        if (plugin->output_buffer_list->mNumberBuffers > 0 && plugin->output_buffer_list->mBuffers[0].mData) {
-            free(plugin->output_buffer_list->mBuffers[0].mData);
+        for (UInt32 i = 0; i < plugin->output_buffer_list->mNumberBuffers; i++) {
+            if (plugin->output_buffer_list->mBuffers[i].mData) {
+                free(plugin->output_buffer_list->mBuffers[i].mData);
+            }
         }
         free(plugin->output_buffer_list);
     }
@@ -216,11 +235,13 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         // MaximumFramesPerSlice might not be supported by all plugins, continue anyway
     }
 
-    // Allocate audio buffers for non-interleaved format (2 channels)
+    // Allocate audio buffers for non-interleaved format
+    // NOTE: Phase 4 limitation - hardcoded to stereo (2 channels)
+    // TODO (Phase 6+): Query plugin's actual channel configuration and support mono/surround
     // Input buffer (for providing audio to effect plugins)
     size_t buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * 2);
     plugin->input_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
-    plugin->input_buffer_list->mNumberBuffers = 2;
+    plugin->input_buffer_list->mNumberBuffers = 2;  // Stereo only
 
     size_t buffer_size = max_block_size * sizeof(float);
     for (UInt32 i = 0; i < 2; i++) {
@@ -325,7 +346,13 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
     }
 
     // Convert non-interleaved output to interleaved stereo
-    if (plugin->output_buffer_list->mNumberBuffers >= 2) {
+    // Verify buffers are valid before dereferencing
+    if (plugin->output_buffer_list->mNumberBuffers >= 2 &&
+        plugin->output_buffer_list->mBuffers[0].mData &&
+        plugin->output_buffer_list->mBuffers[1].mData &&
+        plugin->output_buffer_list->mBuffers[0].mDataByteSize >= frames * sizeof(float) &&
+        plugin->output_buffer_list->mBuffers[1].mDataByteSize >= frames * sizeof(float)) {
+
         const float* left_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[0].mData);
         const float* right_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[1].mData);
 
@@ -333,6 +360,9 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
             output[i * 2] = left_in[i];
             output[i * 2 + 1] = right_in[i];
         }
+    } else {
+        // Buffer validation failed - return silence
+        memset(output, 0, frames * 2 * sizeof(float));
     }
 
     return RACK_AU_OK;
