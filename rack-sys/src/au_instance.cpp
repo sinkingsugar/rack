@@ -3,6 +3,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstring>
 #include <cstdio>  // for sscanf
+#include <climits> // for INT_MAX
 #include <new>     // for std::align_val_t
 
 #ifdef __ARM_NEON
@@ -946,12 +947,17 @@ int rack_au_plugin_get_preset_info(
 
     // Extract preset name
     if (preset->presetName) {
-        CFStringGetCString(
+        Boolean success = CFStringGetCString(
             preset->presetName,
             name,
             name_size,
             kCFStringEncodingUTF8
         );
+
+        if (!success) {
+            // Fallback: buffer too small or encoding failed
+            snprintf(name, name_size, "Preset %d", preset->presetNumber);
+        }
     } else {
         // Fallback: use preset number as name
         snprintf(name, name_size, "Preset %d", preset->presetNumber);
@@ -1025,6 +1031,11 @@ int rack_au_plugin_get_state_size(RackAUPlugin* plugin) {
 
     CFIndex size = CFDataGetLength(data);
     CFRelease(data);
+
+    // Validate size fits in int (prevent overflow)
+    if (size > INT_MAX || size < 0) {
+        return 0;  // State too large or invalid
+    }
 
     return static_cast<int>(size);
 }
@@ -1118,6 +1129,13 @@ int rack_au_plugin_set_state(RackAUPlugin* plugin, const uint8_t* data, size_t s
 
     if (!class_info) {
         return RACK_AU_ERROR_GENERIC;  // Failed to deserialize
+    }
+
+    // Validate that class_info is a dictionary (expected by AudioUnit)
+    // This protects against malformed/corrupted state data
+    if (CFGetTypeID(class_info) != CFDictionaryGetTypeID()) {
+        CFRelease(class_info);
+        return RACK_AU_ERROR_GENERIC;  // Invalid property list type
     }
 
     // Restore plugin state

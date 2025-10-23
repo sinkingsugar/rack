@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <cstring>
 #include <cmath>
+#include <memory>
 
 void test_invalid_unique_id() {
     std::cout << "Test 1: Invalid unique_id handling\n";
@@ -808,15 +809,14 @@ void test_preset_operations() {
     std::cout << "  State size: " << state_size << " bytes\n";
     std::cout << "PASS: State size retrieved\n";
 
-    // Allocate buffer for state
-    uint8_t* state_data = new uint8_t[state_size];
+    // Allocate buffer for state (use unique_ptr for automatic cleanup)
+    std::unique_ptr<uint8_t[]> state_data(new uint8_t[state_size]);
     size_t actual_size = state_size;
 
     // Get state
-    result = rack_au_plugin_get_state(plugin, state_data, &actual_size);
+    result = rack_au_plugin_get_state(plugin, state_data.get(), &actual_size);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Failed to get state (error: " << result << ")\n";
-        delete[] state_data;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -843,10 +843,9 @@ void test_preset_operations() {
     }
 
     // Restore state
-    result = rack_au_plugin_set_state(plugin, state_data, actual_size);
+    result = rack_au_plugin_set_state(plugin, state_data.get(), actual_size);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Failed to restore state (error: " << result << ")\n";
-        delete[] state_data;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -863,7 +862,6 @@ void test_preset_operations() {
         if (std::abs(restored_value - original_param_value) > 0.01f) {
             std::cerr << "FAIL: Parameter not restored correctly (expected " << original_param_value
                       << ", got " << restored_value << ")\n";
-            delete[] state_data;
             rack_au_plugin_free(plugin);
             delete[] plugins;
             rack_au_scanner_free(scanner);
@@ -878,7 +876,6 @@ void test_preset_operations() {
     result = rack_au_plugin_set_state(plugin, nullptr, 0);
     if (result == RACK_AU_OK) {
         std::cerr << "FAIL: Should reject null state data\n";
-        delete[] state_data;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -886,8 +883,7 @@ void test_preset_operations() {
     }
     std::cout << "PASS: Null state data rejected\n";
 
-    // Cleanup
-    delete[] state_data;
+    // Cleanup (state_data automatically freed by unique_ptr)
     rack_au_plugin_free(plugin);
     delete[] plugins;
     rack_au_scanner_free(scanner);

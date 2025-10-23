@@ -28,6 +28,9 @@ fn main() -> Result<()> {
     println!("Found {} plugin(s)\n", plugins.len());
 
     // Find first plugin with presets
+    // NOTE: This is a demonstration example that loads plugins to check for presets.
+    // In production code, consider caching preset availability during scanning or
+    // allowing the user to select a plugin manually to avoid loading many plugins.
     let plugin_with_presets = plugins.iter().find(|info| {
         // Try to check if plugin has presets by creating a temporary instance
         if let Ok(mut plugin) = scanner.load(info) {
