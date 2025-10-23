@@ -274,7 +274,17 @@ impl PluginInstance for AudioUnitPlugin {
             );
 
             if result != ffi::RACK_AU_OK {
-                return Err(map_error(result));
+                let err = map_error(result);
+
+                // If the plugin is an effect, provide more specific error context
+                if matches!(self.info.plugin_type, crate::PluginType::Effect) {
+                    return Err(Error::Other(format!(
+                        "Effect plugin '{}' does not support MIDI (only instrument plugins typically respond to MIDI)",
+                        self.info.name
+                    )));
+                }
+
+                return Err(err);
             }
 
             Ok(())
@@ -869,6 +879,43 @@ mod tests {
         assert!(matches!(result, Err(Error::NotInitialized)));
 
         println!("✓ send_midi correctly fails before initialization");
+    }
+
+    #[test]
+    fn test_send_midi_multi_channel() {
+        let Some(info) = get_instrument_plugin() else {
+            println!("No instrument plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Send notes on different MIDI channels (0, 5, 10, 15)
+        let events = vec![
+            MidiEvent::note_on(60, 100, 0, 0),   // Middle C on channel 0
+            MidiEvent::note_on(64, 100, 5, 0),   // E on channel 5
+            MidiEvent::note_on(67, 100, 10, 0),  // G on channel 10 (drums in GM)
+            MidiEvent::note_on(72, 100, 15, 0),  // High C on channel 15
+        ];
+
+        let result = plugin.send_midi(&events);
+        assert!(result.is_ok(), "Failed to send multi-channel MIDI: {:?}", result.err());
+
+        // Process audio to verify notes rendered
+        let input = AudioBuffer::new(512 * 2);
+        let mut output = AudioBuffer::new(512 * 2);
+        plugin
+            .process(&input, &mut output)
+            .expect("Failed to process audio");
+
+        // Check that we got some audio output
+        let has_output = output.iter().any(|&sample| sample.abs() > 1e-6);
+        assert!(has_output, "Expected audio output from multi-channel MIDI notes");
+
+        println!("✓ Multi-channel MIDI events sent successfully");
     }
 
     #[test]

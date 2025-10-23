@@ -114,6 +114,9 @@ pub enum MidiEventKind {
 }
 
 impl MidiEvent {
+    /// Pitch bend center value (no pitch change)
+    pub const PITCH_BEND_CENTER: u16 = 8192;
+
     /// Create a new Note On event
     ///
     /// # Arguments
@@ -292,6 +295,25 @@ impl MidiEvent {
         }
     }
 
+    /// Create a pitch bend event with no bend (centered)
+    ///
+    /// # Arguments
+    ///
+    /// * `channel` - MIDI channel (0-15, clamped if out of range)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rack::midi::MidiEvent;
+    ///
+    /// // Reset pitch bend to center (no bend)
+    /// let event = MidiEvent::pitch_bend_center(0, 0);
+    /// ```
+    pub fn pitch_bend_center(channel: u8, sample_offset: u32) -> Self {
+        Self::pitch_bend(Self::PITCH_BEND_CENTER, channel, sample_offset)
+    }
+
     /// Create a MIDI Timing Clock event
     ///
     /// # Arguments
@@ -434,5 +456,27 @@ mod tests {
             }
             _ => panic!("Expected NoteOn event"),
         }
+    }
+
+    #[test]
+    fn test_pitch_bend_center() {
+        // Test the PITCH_BEND_CENTER constant
+        assert_eq!(MidiEvent::PITCH_BEND_CENTER, 8192);
+
+        // Test pitch_bend_center helper
+        let event = MidiEvent::pitch_bend_center(0, 0);
+        match event.kind {
+            MidiEventKind::PitchBend { value, channel } => {
+                assert_eq!(value, 8192);
+                assert_eq!(channel, 0);
+            }
+            _ => panic!("Expected PitchBend event"),
+        }
+
+        // Test that manual creation is equivalent to helper
+        let manual = MidiEvent::pitch_bend(MidiEvent::PITCH_BEND_CENTER, 5, 100);
+        let helper = MidiEvent::pitch_bend_center(5, 100);
+        assert_eq!(manual.kind, helper.kind);
+        assert_eq!(manual.sample_offset, helper.sample_offset);
     }
 }
