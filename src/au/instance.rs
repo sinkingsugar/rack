@@ -347,4 +347,170 @@ mod tests {
 
         println!("✓ Audio processing succeeded, output contains signal");
     }
+
+    #[test]
+    fn test_parameter_count() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing parameter count with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        println!("  Found {} parameters", count);
+
+        // Verify we can call it - parameter_count should never panic
+        // (Some plugins might have 0 parameters, which is fine)
+    }
+
+    #[test]
+    fn test_parameter_info() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing parameter info with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            println!("  Plugin has no parameters, skipping test");
+            return;
+        }
+
+        // Get info for first parameter
+        let param_info = plugin
+            .parameter_info(0)
+            .expect("Failed to get parameter info");
+
+        println!("  Parameter 0: {}", param_info.name);
+        println!("    Range: {} - {}", param_info.min, param_info.max);
+        println!("    Default: {}", param_info.default);
+
+        assert!(!param_info.name.is_empty(), "Parameter name should not be empty");
+        assert!(param_info.index == 0);
+    }
+
+    #[test]
+    fn test_get_set_parameter() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        println!("Testing get/set parameter with: {}", info.name);
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            println!("  Plugin has no parameters, skipping test");
+            return;
+        }
+
+        // Get original value
+        let original_value = plugin
+            .get_parameter(0)
+            .expect("Failed to get parameter");
+
+        println!("  Original value: {}", original_value);
+
+        // Set to a different value (0.75, normalized)
+        plugin
+            .set_parameter(0, 0.75)
+            .expect("Failed to set parameter");
+
+        // Verify it changed
+        let new_value = plugin
+            .get_parameter(0)
+            .expect("Failed to get parameter after set");
+
+        println!("  New value: {}", new_value);
+
+        // Value should be close to 0.75 (allowing for small floating point error)
+        assert!(
+            (new_value - 0.75).abs() < 0.01,
+            "Parameter value should be ~0.75, got {}",
+            new_value
+        );
+
+        // Restore original value
+        plugin
+            .set_parameter(0, original_value)
+            .expect("Failed to restore parameter");
+    }
+
+    #[test]
+    fn test_parameter_range_clamping() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            return;
+        }
+
+        // Test setting values outside 0.0-1.0 range (should be clamped by C++ layer)
+        plugin.set_parameter(0, 2.0).expect("Should handle > 1.0");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value <= 1.0,
+            "Parameter should be clamped to <= 1.0, got {}",
+            value
+        );
+
+        plugin.set_parameter(0, -1.0).expect("Should handle < 0.0");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0,
+            "Parameter should be clamped to >= 0.0, got {}",
+            value
+        );
+    }
+
+    #[test]
+    fn test_parameter_out_of_bounds() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+
+        // Try to access parameter beyond count
+        let result = plugin.get_parameter(count + 10);
+        assert!(result.is_err(), "Should fail for out-of-bounds index");
+
+        let result = plugin.set_parameter(count + 10, 0.5);
+        assert!(result.is_err(), "Should fail for out-of-bounds index");
+
+        let result = plugin.parameter_info(count + 10);
+        assert!(result.is_err(), "Should fail for out-of-bounds index");
+    }
 }

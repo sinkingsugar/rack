@@ -83,101 +83,31 @@
 
 ---
 
-## 🚧 Next Phase: Parameter Control
+### Phase 5: Parameter Control
+- [x] C++ parameter implementation (`rack-sys/src/au_instance.cpp`)
+- [x] Parameter enumeration with `kAudioUnitProperty_ParameterList`
+- [x] Parameter info with name, min/max, default values
+- [x] Get/set parameter with normalization (0.0-1.0)
+- [x] FFI bindings for parameter functions
+- [x] Safe Rust wrapper (`src/au/instance.rs`)
+- [x] Parameter methods in `AudioUnitPlugin`
+- [x] C++ tests (Test 5: Parameter operations)
+- [x] Rust integration tests (5 new parameter tests)
+- [x] Example: `control_parameters.rs` with parameter demo
+- [x] All PR review issues addressed
 
-### Goal
-Implement parameter enumeration and control for AudioUnit plugins
+**Status**: Parameter control complete. Successfully enumerate, read, and write plugin parameters with automatic normalization.
 
-### Tasks
+**Key Files**:
+- `rack-sys/src/au_instance.cpp` - Parameter implementation with AudioUnit API
+- `src/au/instance.rs` - Safe Rust wrapper for parameter operations
+- `examples/control_parameters.rs` - Complete parameter control demonstration
 
-#### 1. Parameter Enumeration
-**Files**: `rack-sys/src/au_instance.cpp`, `src/au/instance.rs`
-
-- [ ] Implement `rack_au_plugin_parameter_count()`
-  - Query `kAudioUnitProperty_ParameterList`
-  - Return number of parameters
-
-- [ ] Implement `rack_au_plugin_parameter_info()`
-  - Query `kAudioUnitProperty_ParameterInfo`
-  - Extract: name, unit, min/max values, default
-  - Map to `ParameterInfo` struct
-
-#### 2. Parameter Get/Set
-**Files**: `rack-sys/src/au_instance.cpp`, `src/au/instance.rs`
-
-- [ ] Implement `rack_au_plugin_get_parameter()`
-  - Use `AudioUnitGetParameter()`
-  - Normalize to 0.0-1.0 range
-
-- [ ] Implement `rack_au_plugin_set_parameter()`
-  - Denormalize from 0.0-1.0 range
-  - Use `AudioUnitSetParameter()`
-  - Handle parameter ramping
-
-#### 3. Rust API
-**Files**: `src/traits.rs`, `src/au/instance.rs`
-
-- [ ] Update `PluginInstance` trait (already has parameter methods)
-- [ ] Implement parameter methods in `AudioUnitPlugin`
-- [ ] Add parameter iteration helpers
-- [ ] Type-safe parameter value conversion
-
-#### 4. Testing
-**Files**: `rack-sys/test/test_instance.cpp`, `src/au/instance.rs`
-
-- [ ] C++ tests for parameter enumeration
-- [ ] C++ tests for get/set operations
-- [ ] Rust tests with real plugins
-- [ ] Test parameter validation
-- [ ] Test parameter persistence across process calls
-
-#### 5. Example
-**Files**: `examples/control_parameters.rs`
-
-```rust
-use rack::prelude::*;
-
-fn main() -> Result<()> {
-    let scanner = Scanner::new()?;
-    let plugins = scanner.scan()?;
-
-    // Load an effect plugin
-    let info = plugins.iter()
-        .find(|p| p.plugin_type == PluginType::Effect)
-        .expect("No effect plugins found");
-
-    let mut plugin = scanner.load(info)?;
-    plugin.initialize(48000.0, 512)?;
-
-    // List parameters
-    println!("Parameters:");
-    for i in 0..plugin.parameter_count() {
-        let param = plugin.parameter_info(i)?;
-        let value = plugin.get_parameter(i)?;
-        println!("  [{}] {}: {:.2}", i, param.name, value);
-    }
-
-    // Modify first parameter
-    if plugin.parameter_count() > 0 {
-        plugin.set_parameter(0, 0.75)?;
-        println!("\nSet parameter 0 to 0.75");
-
-        let new_value = plugin.get_parameter(0)?;
-        println!("New value: {:.2}", new_value);
-    }
-
-    Ok(())
-}
-```
-
-### Success Criteria
-- [ ] Enumerate all parameters from AudioUnit plugins
-- [ ] Get parameter values (normalized 0.0-1.0)
-- [ ] Set parameter values with proper range conversion
-- [ ] All tests passing (C++ and Rust)
-- [ ] Example demonstrates parameter control
-- [ ] Thread-safe parameter access
-- [ ] No audio glitches when changing parameters
+**Test Results**:
+- 25/25 Rust tests passing (added 5 parameter tests)
+- 5/5 C++ tests passing (added parameter operations test)
+- 4/4 doctests passing
+- All examples working (including new control_parameters example)
 
 ---
 

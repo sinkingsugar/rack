@@ -34,6 +34,10 @@ struct RackAUPlugin {
 
     // Sample position tracking for AudioTimeStamp
     int64_t sample_position;
+
+    // Parameter cache
+    AudioUnitParameterID* parameter_ids;
+    UInt32 parameter_count;
 };
 
 // ============================================================================
@@ -164,6 +168,8 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     plugin->output_buffer_list = nullptr;
     plugin->current_input = nullptr;
     plugin->sample_position = 0;
+    plugin->parameter_ids = nullptr;
+    plugin->parameter_count = 0;
     strncpy(plugin->unique_id, unique_id, sizeof(plugin->unique_id) - 1);
     plugin->unique_id[sizeof(plugin->unique_id) - 1] = '\0';
 
@@ -218,6 +224,11 @@ void rack_au_plugin_free(RackAUPlugin* plugin) {
             }
         }
         free(plugin->output_buffer_list);
+    }
+
+    // Free parameter cache
+    if (plugin->parameter_ids) {
+        free(plugin->parameter_ids);
     }
 
     delete plugin;
@@ -397,6 +408,42 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         return RACK_AU_ERROR_AUDIO_UNIT + status;
     }
 
+    // Query parameter list (may fail for plugins without parameters)
+    UInt32 data_size = 0;
+    status = AudioUnitGetPropertyInfo(
+        plugin->audio_unit,
+        kAudioUnitProperty_ParameterList,
+        kAudioUnitScope_Global,
+        0,
+        &data_size,
+        nullptr
+    );
+
+    if (status == noErr && data_size > 0) {
+        plugin->parameter_count = data_size / sizeof(AudioUnitParameterID);
+        plugin->parameter_ids = static_cast<AudioUnitParameterID*>(malloc(data_size));
+
+        if (plugin->parameter_ids) {
+            status = AudioUnitGetProperty(
+                plugin->audio_unit,
+                kAudioUnitProperty_ParameterList,
+                kAudioUnitScope_Global,
+                0,
+                plugin->parameter_ids,
+                &data_size
+            );
+
+            if (status != noErr) {
+                // Failed to get parameter list, clean up
+                free(plugin->parameter_ids);
+                plugin->parameter_ids = nullptr;
+                plugin->parameter_count = 0;
+            }
+        } else {
+            plugin->parameter_count = 0;
+        }
+    }
+
     plugin->initialized = true;
     return RACK_AU_OK;
 }
@@ -519,32 +566,120 @@ int rack_au_plugin_parameter_count(RackAUPlugin* plugin) {
     if (!plugin || !plugin->initialized) {
         return 0;
     }
-    
-    // TODO: Query actual parameter count from AudioUnit
-    return 0;
+
+    return static_cast<int>(plugin->parameter_count);
 }
 
 int rack_au_plugin_get_parameter(RackAUPlugin* plugin, uint32_t index, float* value) {
     if (!plugin || !plugin->initialized) {
         return RACK_AU_ERROR_NOT_INITIALIZED;
     }
-    
+
     if (!value) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
-    
-    // TODO: Get actual parameter value from AudioUnit
-    *value = 0.0f;
-    return RACK_AU_ERROR_INVALID_PARAM;
+
+    if (index >= plugin->parameter_count) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    AudioUnitParameterID param_id = plugin->parameter_ids[index];
+
+    // Get parameter info for min/max values (needed for normalization)
+    AudioUnitParameterInfo param_info;
+    UInt32 data_size = sizeof(param_info);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ParameterInfo,
+        kAudioUnitScope_Global,
+        param_id,
+        &param_info,
+        &data_size
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Get current parameter value
+    AudioUnitParameterValue raw_value;
+    status = AudioUnitGetParameter(
+        plugin->audio_unit,
+        param_id,
+        kAudioUnitScope_Global,
+        0,
+        &raw_value
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Normalize to 0.0-1.0 range
+    float min_val = param_info.minValue;
+    float max_val = param_info.maxValue;
+    float range = max_val - min_val;
+
+    if (range > 0.0f) {
+        *value = (raw_value - min_val) / range;
+    } else {
+        *value = 0.0f;
+    }
+
+    return RACK_AU_OK;
 }
 
 int rack_au_plugin_set_parameter(RackAUPlugin* plugin, uint32_t index, float value) {
     if (!plugin || !plugin->initialized) {
         return RACK_AU_ERROR_NOT_INITIALIZED;
     }
-    
-    // TODO: Set actual parameter value on AudioUnit
-    return RACK_AU_ERROR_INVALID_PARAM;
+
+    if (index >= plugin->parameter_count) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Clamp normalized value to 0.0-1.0
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+
+    AudioUnitParameterID param_id = plugin->parameter_ids[index];
+
+    // Get parameter info for min/max values (needed for denormalization)
+    AudioUnitParameterInfo param_info;
+    UInt32 data_size = sizeof(param_info);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ParameterInfo,
+        kAudioUnitScope_Global,
+        param_id,
+        &param_info,
+        &data_size
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Denormalize from 0.0-1.0 to actual parameter range
+    float min_val = param_info.minValue;
+    float max_val = param_info.maxValue;
+    float raw_value = min_val + (value * (max_val - min_val));
+
+    // Set parameter value (with 0 sample offset for immediate change)
+    status = AudioUnitSetParameter(
+        plugin->audio_unit,
+        param_id,
+        kAudioUnitScope_Global,
+        0,
+        raw_value,
+        0  // Sample offset (0 = immediate)
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    return RACK_AU_OK;
 }
 
 int rack_au_plugin_parameter_info(
@@ -559,11 +694,50 @@ int rack_au_plugin_parameter_info(
     if (!plugin || !plugin->initialized) {
         return RACK_AU_ERROR_NOT_INITIALIZED;
     }
-    
+
     if (!name || !min || !max || !default_value) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
-    
-    // TODO: Get actual parameter info from AudioUnit
-    return RACK_AU_ERROR_INVALID_PARAM;
+
+    if (index >= plugin->parameter_count) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    AudioUnitParameterID param_id = plugin->parameter_ids[index];
+
+    // Get parameter info
+    AudioUnitParameterInfo param_info;
+    UInt32 data_size = sizeof(param_info);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ParameterInfo,
+        kAudioUnitScope_Global,
+        param_id,
+        &param_info,
+        &data_size
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Extract parameter name
+    if (param_info.cfNameString) {
+        CFStringGetCString(
+            param_info.cfNameString,
+            name,
+            name_size,
+            kCFStringEncodingUTF8
+        );
+    } else {
+        // Fallback: use parameter ID as name
+        snprintf(name, name_size, "Parameter %u", param_id);
+    }
+
+    // Extract min/max/default values
+    *min = param_info.minValue;
+    *max = param_info.maxValue;
+    *default_value = param_info.defaultValue;
+
+    return RACK_AU_OK;
 }
