@@ -92,19 +92,29 @@ int rack_au_plugin_is_initialized(RackAUPlugin* plugin);
 int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* output, uint32_t frames);
 
 // Get parameter count
+// Thread-safety: Read-only after initialization. Safe to call from any thread,
+// but plugin instances should not be shared across threads (Send but not Sync).
 int rack_au_plugin_parameter_count(RackAUPlugin* plugin);
 
 // Get parameter value (normalized 0.0 to 1.0)
 // Returns 0 on success, negative error code on failure
+// Thread-safety: Can be called from any thread, but the same plugin instance
+// must not be accessed concurrently. Parameter cache is read-only after init.
+// Typical usage: one thread owns the plugin, calls from audio/UI threads are serialized.
 int rack_au_plugin_get_parameter(RackAUPlugin* plugin, uint32_t index, float* value);
 
 // Set parameter value (normalized 0.0 to 1.0)
 // Returns 0 on success, negative error code on failure
+// Thread-safety: Can be called from any thread, but the same plugin instance
+// must not be accessed concurrently. Parameter cache is read-only after init.
+// Note: Calling during audio processing may cause clicks/pops (AudioUnit internal behavior).
 int rack_au_plugin_set_parameter(RackAUPlugin* plugin, uint32_t index, float value);
 
 // Get parameter info
 // name: output buffer for parameter name (allocated by caller)
 // name_size: size of name buffer
+// unit: output buffer for parameter unit string (allocated by caller, can be NULL)
+// unit_size: size of unit buffer (ignored if unit is NULL)
 // Returns 0 on success, negative error code on failure
 int rack_au_plugin_parameter_info(
     RackAUPlugin* plugin,
@@ -113,7 +123,9 @@ int rack_au_plugin_parameter_info(
     size_t name_size,
     float* min,
     float* max,
-    float* default_value
+    float* default_value,
+    char* unit,
+    size_t unit_size
 );
 
 #ifdef __cplusplus

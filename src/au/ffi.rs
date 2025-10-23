@@ -233,7 +233,7 @@ extern "C" {
         value: f32,
     ) -> c_int;
 
-    /// Get parameter info (name, min, max, default)
+    /// Get parameter info (name, min, max, default, unit)
     ///
     /// # Returns
     ///
@@ -246,8 +246,10 @@ extern "C" {
     /// - `index` must be less than parameter count
     /// - `name` must point to a buffer with at least `name_size` bytes
     /// - `min`, `max`, `default_value` must be valid pointers to f32
-    /// - `name` will be null-terminated
+    /// - `unit` can be NULL, or must point to a buffer with at least `unit_size` bytes
+    /// - `name` and `unit` (if not NULL) will be null-terminated
     /// - `name_size` should be at least 256 bytes for typical parameter names
+    /// - `unit_size` should be at least 32 bytes for typical unit strings
     pub fn rack_au_plugin_parameter_info(
         plugin: *mut RackAUPlugin,
         index: u32,
@@ -256,5 +258,7 @@ extern "C" {
         min: *mut f32,
         max: *mut f32,
         default_value: *mut f32,
+        unit: *mut c_char,
+        unit_size: usize,
     ) -> c_int;
 }

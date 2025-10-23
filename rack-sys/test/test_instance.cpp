@@ -303,6 +303,183 @@ void test_audio_processing() {
     std::cout << "\n";
 }
 
+void test_parameter_operations() {
+    std::cout << "Test 5: Parameter operations\n";
+    std::cout << "-----------------------------\n";
+
+    // Scan for a plugin to test with
+    RackAUScanner* scanner = rack_au_scanner_new();
+    if (!scanner) {
+        std::cerr << "FAIL: Failed to create scanner\n";
+        return;
+    }
+
+    int count = rack_au_scanner_scan(scanner, nullptr, 0);
+    if (count <= 0) {
+        std::cerr << "SKIP: No plugins found to test with\n\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    RackAUPluginInfo* plugins = new(std::nothrow) RackAUPluginInfo[count];
+    if (!plugins) {
+        std::cerr << "FAIL: Failed to allocate memory\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int filled = rack_au_scanner_scan(scanner, plugins, count);
+    if (filled <= 0) {
+        std::cerr << "FAIL: Failed to scan plugins\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Find an effect plugin (more likely to have parameters)
+    const char* unique_id = nullptr;
+    const char* plugin_name = nullptr;
+    for (int i = 0; i < filled; i++) {
+        if (plugins[i].plugin_type == RACK_AU_TYPE_EFFECT) {
+            unique_id = plugins[i].unique_id;
+            plugin_name = plugins[i].name;
+            break;
+        }
+    }
+
+    if (!unique_id) {
+        std::cout << "SKIP: No effect plugins found for parameter test\n\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "Testing parameters with: " << plugin_name << "\n";
+
+    // Create and initialize plugin
+    RackAUPlugin* plugin = rack_au_plugin_new(unique_id);
+    if (!plugin) {
+        std::cerr << "FAIL: Failed to create plugin instance\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int result = rack_au_plugin_initialize(plugin, 48000.0, 512);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to initialize plugin (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Test parameter count
+    int param_count = rack_au_plugin_parameter_count(plugin);
+    std::cout << "  Parameter count: " << param_count << "\n";
+    std::cout << "PASS: Parameter count retrieved\n";
+
+    if (param_count == 0) {
+        std::cout << "  Plugin has no parameters, skipping parameter tests\n\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Test parameter info
+    char name[256];
+    char unit[32];
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+    float default_val = 0.0f;
+
+    result = rack_au_plugin_parameter_info(plugin, 0, name, sizeof(name), &min_val, &max_val, &default_val, unit, sizeof(unit));
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to get parameter info (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "  Parameter 0: " << name;
+    if (unit[0] != '\0') {
+        std::cout << " (" << unit << ")";
+    }
+    std::cout << "\n";
+    std::cout << "    Range: " << min_val << " - " << max_val << "\n";
+    std::cout << "    Default: " << default_val << "\n";
+    std::cout << "PASS: Parameter info retrieved\n";
+
+    // Test get parameter
+    float value = 0.0f;
+    result = rack_au_plugin_get_parameter(plugin, 0, &value);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to get parameter (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "  Current value: " << std::fixed << std::setprecision(4) << value << " (normalized)\n";
+    std::cout << "PASS: Parameter value retrieved\n";
+
+    // Test set parameter
+    float original_value = value;
+    result = rack_au_plugin_set_parameter(plugin, 0, 0.75f);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to set parameter (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Verify the value changed
+    result = rack_au_plugin_get_parameter(plugin, 0, &value);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to get parameter after set (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    if (std::abs(value - 0.75f) > 0.01f) {
+        std::cerr << "FAIL: Parameter value should be ~0.75, got " << value << "\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "  New value: " << value << " (normalized)\n";
+    std::cout << "PASS: Parameter set and verified\n";
+
+    // Restore original value
+    rack_au_plugin_set_parameter(plugin, 0, original_value);
+
+    // Test out of bounds index
+    result = rack_au_plugin_get_parameter(plugin, param_count + 10, &value);
+    if (result == RACK_AU_OK) {
+        std::cerr << "FAIL: Should fail for out-of-bounds index\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: Out-of-bounds index rejected\n";
+
+    // Cleanup
+    rack_au_plugin_free(plugin);
+    delete[] plugins;
+    rack_au_scanner_free(scanner);
+
+    std::cout << "\n";
+}
+
 int main() {
     std::cout << "AudioUnit Plugin Instance Test\n";
     std::cout << "===============================\n\n";
@@ -311,6 +488,7 @@ int main() {
     test_plugin_lifecycle();
     test_invalid_parameters();
     test_audio_processing();
+    test_parameter_operations();
 
     std::cout << "All tests completed!\n";
     return 0;
