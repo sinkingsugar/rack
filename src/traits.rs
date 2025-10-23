@@ -51,10 +51,10 @@ pub trait PluginInstance: Send {
     ///
     /// # Performance Note
     ///
-    /// This method allocates memory to convert events to FFI format.
-    /// For real-time audio threads with strict latency requirements,
-    /// consider sending MIDI events from a separate thread or using
-    /// a pre-allocated event queue.
+    /// This method is **zero-allocation** for typical use cases (≤16 events).
+    /// Events are stored on the stack using `SmallVec`, avoiding heap allocation
+    /// for chords, sequences, and most real-time MIDI scenarios. Only batches
+    /// exceeding 16 events will allocate from the heap.
     ///
     /// # MIDI Message Support
     ///

@@ -1,4 +1,5 @@
 use crate::{AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, Result};
+use smallvec::SmallVec;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -201,7 +202,8 @@ impl PluginInstance for AudioUnitPlugin {
         }
 
         // Convert Rust MIDI events to FFI events
-        let ffi_events: Vec<ffi::RackAUMidiEvent> = events
+        // Use SmallVec to avoid heap allocation for typical use cases (1-16 events)
+        let ffi_events: SmallVec<[ffi::RackAUMidiEvent; 16]> = events
             .iter()
             .map(|event| {
                 let (status, data1, data2, channel) = match event.kind {
