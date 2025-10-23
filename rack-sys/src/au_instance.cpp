@@ -891,15 +891,21 @@ int rack_au_plugin_send_midi(
     for (uint32_t i = 0; i < event_count; i++) {
         const RackAUMidiEvent* event = &events[i];
 
-        // Validate MIDI channel (0-15)
-        if (event->channel > 15) {
-            return RACK_AU_ERROR_INVALID_PARAM;
-        }
+        uint8_t status;
 
-        // Combine status byte with channel
-        // Clear any channel bits from status (use upper nibble only), then combine with channel
-        // Status byte upper nibble (0x90, 0x80, etc.) + channel lower nibble (0-15)
-        uint8_t status = (event->status & 0xF0) | (event->channel & 0x0F);
+        // System messages (0xF0-0xFF) don't use channels
+        if (event->status >= 0xF0) {
+            // System message - use status byte as-is
+            status = event->status;
+        } else {
+            // Channel message - validate channel and combine
+            if (event->channel > 15) {
+                return RACK_AU_ERROR_INVALID_PARAM;
+            }
+            // Clear any channel bits from status (use upper nibble only), then combine with channel
+            // Status byte upper nibble (0x90, 0x80, etc.) + channel lower nibble (0-15)
+            status = (event->status & 0xF0) | (event->channel & 0x0F);
+        }
 
         // Send MIDI event to AudioUnit
         // MusicDeviceMIDIEvent is the primary API for sending MIDI to instrument plugins

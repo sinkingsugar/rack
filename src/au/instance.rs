@@ -213,6 +213,9 @@ impl PluginInstance for AudioUnitPlugin {
                     MidiEventKind::NoteOff { note, velocity, channel } => {
                         (ffi::RackAUMidiEventType::NoteOff as u8, note, velocity, channel)
                     }
+                    MidiEventKind::PolyphonicAftertouch { note, pressure, channel } => {
+                        (ffi::RackAUMidiEventType::PolyphonicAftertouch as u8, note, pressure, channel)
+                    }
                     MidiEventKind::ControlChange { controller, value, channel } => {
                         (ffi::RackAUMidiEventType::ControlChange as u8, controller, value, channel)
                     }
@@ -220,6 +223,36 @@ impl PluginInstance for AudioUnitPlugin {
                         // Program Change only has 1 data byte (program number)
                         // data2 is 0 because MIDI Program Change messages don't use it
                         (ffi::RackAUMidiEventType::ProgramChange as u8, program, 0, channel)
+                    }
+                    MidiEventKind::ChannelAftertouch { pressure, channel } => {
+                        // Channel Aftertouch only has 1 data byte (pressure value)
+                        (ffi::RackAUMidiEventType::ChannelAftertouch as u8, pressure, 0, channel)
+                    }
+                    MidiEventKind::PitchBend { value, channel } => {
+                        // Pitch bend uses 14-bit value split into two 7-bit bytes
+                        // LSB (least significant 7 bits) in data1, MSB (most significant 7 bits) in data2
+                        let lsb = (value & 0x7F) as u8;
+                        let msb = ((value >> 7) & 0x7F) as u8;
+                        (ffi::RackAUMidiEventType::PitchBend as u8, lsb, msb, channel)
+                    }
+                    // System Real-Time messages (no channel or data bytes)
+                    MidiEventKind::TimingClock => {
+                        (ffi::RackAUMidiEventType::TimingClock as u8, 0, 0, 0)
+                    }
+                    MidiEventKind::Start => {
+                        (ffi::RackAUMidiEventType::Start as u8, 0, 0, 0)
+                    }
+                    MidiEventKind::Continue => {
+                        (ffi::RackAUMidiEventType::Continue as u8, 0, 0, 0)
+                    }
+                    MidiEventKind::Stop => {
+                        (ffi::RackAUMidiEventType::Stop as u8, 0, 0, 0)
+                    }
+                    MidiEventKind::ActiveSensing => {
+                        (ffi::RackAUMidiEventType::ActiveSensing as u8, 0, 0, 0)
+                    }
+                    MidiEventKind::SystemReset => {
+                        (ffi::RackAUMidiEventType::SystemReset as u8, 0, 0, 0)
                     }
                 };
 

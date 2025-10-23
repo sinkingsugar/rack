@@ -292,8 +292,23 @@ extern "C" {
 pub enum RackAUMidiEventType {
     NoteOn = 0x90,
     NoteOff = 0x80,
+    PolyphonicAftertouch = 0xA0,
     ControlChange = 0xB0,
     ProgramChange = 0xC0,
+    ChannelAftertouch = 0xD0,
+    PitchBend = 0xE0,
+    // System messages (no channel)
+    SystemExclusive = 0xF0,
+    TimeCode = 0xF1,
+    SongPosition = 0xF2,
+    SongSelect = 0xF3,
+    TuneRequest = 0xF6,
+    TimingClock = 0xF8,
+    Start = 0xFA,
+    Continue = 0xFB,
+    Stop = 0xFC,
+    ActiveSensing = 0xFE,
+    SystemReset = 0xFF,
 }
 
 // MIDI event struct (matches C layout exactly)

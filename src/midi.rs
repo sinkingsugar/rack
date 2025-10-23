@@ -5,19 +5,23 @@
 //!
 //! ## Supported MIDI Messages
 //!
-//! Phase 6 implements the most common MIDI messages for instrument control:
+//! Phase 6 implements comprehensive MIDI 1.0 message support:
 //!
+//! ### Channel Messages
 //! - **Note On/Off** - Trigger and release notes with velocity
+//! - **Polyphonic Aftertouch** - Per-key pressure sensitivity
 //! - **Control Change (CC)** - Modulation, expression, pedals, etc.
 //! - **Program Change** - Switch between instrument patches
+//! - **Channel Aftertouch** - Channel-wide pressure sensitivity
+//! - **Pitch Bend** - Continuous pitch modulation (14-bit resolution)
 //!
-//! ## Planned for Future Phases
-//!
-//! Additional MIDI message types will be added in Phase 6.1 or Phase 9:
-//!
-//! - **Pitch Bend** - Continuous pitch modulation (very common in synthesizers)
-//! - **Aftertouch** - Pressure sensitivity (polyphonic and channel)
-//! - **System Messages** - MIDI clock, start/stop for sequencers
+//! ### System Real-Time Messages
+//! - **Timing Clock** - 24 pulses per quarter note for tempo sync
+//! - **Start** - Start sequencer playback
+//! - **Continue** - Resume sequencer playback
+//! - **Stop** - Stop sequencer playback
+//! - **Active Sensing** - Connection status monitoring
+//! - **System Reset** - Reset all devices to power-on state
 //!
 //! ## Sample-Accurate Timing
 //!
@@ -71,6 +75,42 @@ pub enum MidiEventKind {
         /// MIDI channel (0-15)
         channel: u8,
     },
+    /// Polyphonic Aftertouch (Key Pressure) event
+    PolyphonicAftertouch {
+        /// MIDI note number (0-127)
+        note: u8,
+        /// Pressure value (0-127)
+        pressure: u8,
+        /// MIDI channel (0-15)
+        channel: u8,
+    },
+    /// Channel Aftertouch (Channel Pressure) event
+    ChannelAftertouch {
+        /// Pressure value (0-127)
+        pressure: u8,
+        /// MIDI channel (0-15)
+        channel: u8,
+    },
+    /// Pitch Bend event
+    PitchBend {
+        /// Pitch bend value (0-16383, where 8192 = center/no bend)
+        /// Lower values bend down, higher values bend up
+        value: u16,
+        /// MIDI channel (0-15)
+        channel: u8,
+    },
+    /// MIDI Timing Clock (system real-time message)
+    TimingClock,
+    /// MIDI Start (system real-time message)
+    Start,
+    /// MIDI Continue (system real-time message)
+    Continue,
+    /// MIDI Stop (system real-time message)
+    Stop,
+    /// MIDI Active Sensing (system real-time message)
+    ActiveSensing,
+    /// MIDI System Reset (system real-time message)
+    SystemReset,
 }
 
 impl MidiEvent {
@@ -181,6 +221,146 @@ impl MidiEvent {
                 program: program.min(127),
                 channel: channel.min(15),
             },
+        }
+    }
+
+    /// Create a new Polyphonic Aftertouch event
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - MIDI note number (0-127, clamped if out of range)
+    /// * `pressure` - Pressure value (0-127, clamped if out of range)
+    /// * `channel` - MIDI channel (0-15, clamped if out of range)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn polyphonic_aftertouch(note: u8, pressure: u8, channel: u8, sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::PolyphonicAftertouch {
+                note: note.min(127),
+                pressure: pressure.min(127),
+                channel: channel.min(15),
+            },
+        }
+    }
+
+    /// Create a new Channel Aftertouch event
+    ///
+    /// # Arguments
+    ///
+    /// * `pressure` - Pressure value (0-127, clamped if out of range)
+    /// * `channel` - MIDI channel (0-15, clamped if out of range)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn channel_aftertouch(pressure: u8, channel: u8, sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::ChannelAftertouch {
+                pressure: pressure.min(127),
+                channel: channel.min(15),
+            },
+        }
+    }
+
+    /// Create a new Pitch Bend event
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - Pitch bend value (0-16383, clamped if out of range, 8192 = center)
+    /// * `channel` - MIDI channel (0-15, clamped if out of range)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rack::midi::MidiEvent;
+    ///
+    /// // No pitch bend (center position)
+    /// let event = MidiEvent::pitch_bend(8192, 0, 0);
+    ///
+    /// // Maximum pitch bend up
+    /// let event = MidiEvent::pitch_bend(16383, 0, 0);
+    ///
+    /// // Maximum pitch bend down
+    /// let event = MidiEvent::pitch_bend(0, 0, 0);
+    /// ```
+    pub fn pitch_bend(value: u16, channel: u8, sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::PitchBend {
+                value: value.min(16383),
+                channel: channel.min(15),
+            },
+        }
+    }
+
+    /// Create a MIDI Timing Clock event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn timing_clock(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::TimingClock,
+        }
+    }
+
+    /// Create a MIDI Start event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn start(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::Start,
+        }
+    }
+
+    /// Create a MIDI Continue event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn continue_playback(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::Continue,
+        }
+    }
+
+    /// Create a MIDI Stop event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn stop(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::Stop,
+        }
+    }
+
+    /// Create a MIDI Active Sensing event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn active_sensing(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::ActiveSensing,
+        }
+    }
+
+    /// Create a MIDI System Reset event
+    ///
+    /// # Arguments
+    ///
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
+    pub fn system_reset(sample_offset: u32) -> Self {
+        Self {
+            sample_offset,
+            kind: MidiEventKind::SystemReset,
         }
     }
 }

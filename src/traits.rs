@@ -58,15 +58,19 @@ pub trait PluginInstance: Send {
     ///
     /// # MIDI Message Support
     ///
-    /// Currently supports:
+    /// Comprehensive MIDI 1.0 support:
+    ///
+    /// **Channel Messages:**
     /// - Note On/Off
+    /// - Polyphonic Aftertouch (per-key pressure)
     /// - Control Change (CC)
     /// - Program Change
+    /// - Channel Aftertouch (channel pressure)
+    /// - Pitch Bend (14-bit resolution)
     ///
-    /// Not yet supported (planned for future phases):
-    /// - Pitch Bend
-    /// - Aftertouch (polyphonic and channel)
-    /// - System messages (clock, start/stop)
+    /// **System Real-Time:**
+    /// - Timing Clock, Start, Continue, Stop
+    /// - Active Sensing, System Reset
     ///
     /// # Arguments
     ///
