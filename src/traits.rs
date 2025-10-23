@@ -1,4 +1,4 @@
-use crate::{AudioBuffer, ParameterInfo, PluginInfo, Result};
+use crate::{AudioBuffer, MidiEvent, ParameterInfo, PluginInfo, Result};
 
 /// Trait for scanning and discovering audio plugins
 pub trait PluginScanner {
@@ -40,6 +40,49 @@ pub trait PluginInstance: Send {
 
     /// Set the value of a parameter (normalized 0.0 to 1.0)
     fn set_parameter(&mut self, index: usize, value: f32) -> Result<()>;
+
+    /// Send MIDI events to the plugin
+    ///
+    /// This is primarily useful for instrument plugins (synthesizers, samplers).
+    /// Effect plugins typically don't respond to MIDI events.
+    ///
+    /// Events are processed immediately. For sample-accurate timing,
+    /// set the `sample_offset` field in each event.
+    ///
+    /// # Performance Note
+    ///
+    /// This method is **zero-allocation** for typical use cases (≤16 events).
+    /// Events are stored on the stack using `SmallVec`, avoiding heap allocation
+    /// for chords, sequences, and most real-time MIDI scenarios. Only batches
+    /// exceeding 16 events will allocate from the heap.
+    ///
+    /// # MIDI Message Support
+    ///
+    /// Comprehensive MIDI 1.0 support:
+    ///
+    /// **Channel Messages:**
+    /// - Note On/Off
+    /// - Polyphonic Aftertouch (per-key pressure)
+    /// - Control Change (CC)
+    /// - Program Change
+    /// - Channel Aftertouch (channel pressure)
+    /// - Pitch Bend (14-bit resolution)
+    ///
+    /// **System Real-Time:**
+    /// - Timing Clock, Start, Continue, Stop
+    /// - Active Sensing, System Reset
+    ///
+    /// # Arguments
+    ///
+    /// * `events` - Slice of MIDI events to send
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin doesn't support MIDI (e.g., most effect plugins)
+    /// - Any event has invalid data (channel > 15, etc.)
+    /// - The plugin is not initialized
+    fn send_midi(&mut self, events: &[MidiEvent]) -> Result<()>;
 
     /// Get plugin info
     fn info(&self) -> &PluginInfo;

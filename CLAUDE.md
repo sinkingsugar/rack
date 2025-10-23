@@ -75,6 +75,19 @@ See TODO.md for detailed phase breakdown and implementation status.
 - Users can write format-agnostic code
 - Clean abstraction boundaries
 
+## Performance and Optimization Principles
+
+**Real-time audio requires zero-allocation hot paths:**
+- Prefer fixing performance issues over documenting them
+- Use stack allocation (SmallVec, arrays) over heap when possible
+- Measure and optimize critical paths (audio processing, MIDI)
+- Real-time code must be lock-free and allocation-free
+
+**Examples of this principle:**
+- MIDI events use `SmallVec<[_; 16]>` for zero-allocation in typical cases
+- Audio buffers use `aligned-vec` for SIMD-optimized processing
+- Future: Consider object pools for large event batches
+
 ## Building
 
 ```bash
@@ -108,9 +121,11 @@ cmake --build . --target test
 
 ## Notes for Future Claude Sessions
 
-- This project has completed Phases 1-5 and is production-ready for AudioUnit parameter control
-- Focus continues on AudioUnit on macOS - MIDI support is next
+- This project has completed Phases 1-6 and is production-ready for AudioUnit MIDI support
+- Phase 6 (MIDI) uses SmallVec for zero-allocation performance
+- Focus continues on AudioUnit on macOS - GUI support is next priority
 - KISS principle guides all design decisions
+- **Performance over documentation**: Fix performance issues, don't just document them
 - Giovanni (user) knows C++ well, leverage that expertise
 - Check rack/CLAUDE.md and rack-sys/CLAUDE.md for component-specific details
 - See TODO.md for current phase status and next steps

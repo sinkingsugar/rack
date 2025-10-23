@@ -863,3 +863,67 @@ int rack_au_plugin_parameter_info(
 
     return RACK_AU_OK;
 }
+
+// ============================================================================
+// MIDI Implementation
+// ============================================================================
+
+int rack_au_plugin_send_midi(
+    RackAUPlugin* plugin,
+    const RackAUMidiEvent* events,
+    uint32_t event_count
+) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    if (!events && event_count > 0) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Early return if no events to send
+    if (event_count == 0) {
+        return RACK_AU_OK;
+    }
+
+    // Send each MIDI event to the AudioUnit
+    // Using MusicDeviceMIDIEvent for sample-accurate timing via event->sample_offset
+    for (uint32_t i = 0; i < event_count; i++) {
+        const RackAUMidiEvent* event = &events[i];
+
+        uint8_t status;
+
+        // System messages (0xF0-0xFF) don't use channels
+        if (event->status >= 0xF0) {
+            // System message - use status byte as-is
+            status = event->status;
+        } else {
+            // Channel message - validate channel and combine
+            if (event->channel > 15) {
+                return RACK_AU_ERROR_INVALID_PARAM;
+            }
+            // Clear any channel bits from status (use upper nibble only), then combine with channel
+            // Status byte upper nibble (0x90, 0x80, etc.) + channel lower nibble (0-15)
+            status = (event->status & 0xF0) | (event->channel & 0x0F);
+        }
+
+        // Send MIDI event to AudioUnit
+        // MusicDeviceMIDIEvent is the primary API for sending MIDI to instrument plugins
+        // For effect plugins that don't implement this, the call will fail gracefully
+        OSStatus result = MusicDeviceMIDIEvent(
+            plugin->audio_unit,
+            status,
+            event->data1,
+            event->data2,
+            event->sample_offset  // Sample offset within buffer for sample-accurate timing
+        );
+
+        // Note: Some effect plugins don't support MIDI, so we check the error
+        // and return it to let Rust handle the failure gracefully
+        if (result != noErr) {
+            return RACK_AU_ERROR_AUDIO_UNIT + result;
+        }
+    }
+
+    return RACK_AU_OK;
+}
