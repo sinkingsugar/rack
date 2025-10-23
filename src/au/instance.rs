@@ -550,4 +550,93 @@ mod tests {
             println!("Parameter {} unit: '{}'", i, param.unit);
         }
     }
+
+    #[test]
+    fn test_parameter_operations_before_init() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        // Don't initialize - test pre-init behavior
+
+        // All operations should fail gracefully before initialization
+        let count = plugin.parameter_count();
+        assert_eq!(count, 0, "Parameter count should be 0 before initialization");
+
+        let result = plugin.parameter_info(0);
+        assert!(result.is_err(), "parameter_info should fail before init");
+
+        let result = plugin.get_parameter(0);
+        assert!(result.is_err(), "get_parameter should fail before init");
+    }
+
+    #[test]
+    fn test_parameter_value_round_trip() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            return;
+        }
+
+        // Test round-tripping at various normalized values
+        let test_values = vec![0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+
+        for &test_value in &test_values {
+            plugin.set_parameter(0, test_value).expect("Failed to set parameter");
+            let read_value = plugin.get_parameter(0).expect("Failed to get parameter");
+
+            // Allow small epsilon for floating-point precision
+            let diff = (read_value - test_value).abs();
+            assert!(
+                diff < 0.01,
+                "Value round-trip failed: set {}, got {} (diff: {})",
+                test_value,
+                read_value,
+                diff
+            );
+        }
+    }
+
+    #[test]
+    fn test_parameter_extreme_values() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            return;
+        }
+
+        // Test extreme values (clamped by C++ layer before passing to AudioUnit)
+        plugin.set_parameter(0, -1.0).expect("Should handle negative values");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(value >= 0.0 && value <= 1.0, "Value should be clamped to 0.0-1.0");
+
+        plugin.set_parameter(0, 2.0).expect("Should handle > 1.0 values");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(value >= 0.0 && value <= 1.0, "Value should be clamped to 0.0-1.0");
+
+        // Note: NaN and infinity are rejected by AudioUnit itself (not our code)
+        // AudioUnit returns error -67743 (kAudioUnitErr_InvalidParameter)
+        // This is correct behavior - we don't need to test these edge cases
+        // as AudioUnit provides its own validation
+    }
 }

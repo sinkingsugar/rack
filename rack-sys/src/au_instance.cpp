@@ -502,6 +502,10 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
                             // to fall back to per-call queries (safer than partial cache)
                             free(plugin->parameter_info);
                             plugin->parameter_info = nullptr;
+                            // NOTE: parameter_ids is intentionally kept here (not a leak)
+                            // - Still needed for parameter enumeration and get/set operations
+                            // - Get/set/info functions have fallback code that queries on-demand when cache is NULL
+                            // - Will be freed in rack_au_plugin_free() during cleanup
                             break;
                         }
                     }
@@ -696,10 +700,21 @@ int rack_au_plugin_get_parameter(RackAUPlugin* plugin, uint32_t index, float* va
     float max_val = param_info.maxValue;
     float range = max_val - min_val;
 
+    // Validate parameter range (detect malformed AudioUnit parameter info)
+    if (max_val < min_val) {
+        // Invalid range - this shouldn't happen with well-formed AudioUnits
+        // Return mid-range as safe fallback
+        *value = 0.5f;
+        return RACK_AU_OK;
+    }
+
     // Use epsilon comparison for floating-point safety
     const float epsilon = 1e-7f;
     if (range > epsilon) {
         *value = (raw_value - min_val) / range;
+        // Clamp to 0.0-1.0 in case of floating-point rounding errors
+        if (*value < 0.0f) *value = 0.0f;
+        if (*value > 1.0f) *value = 1.0f;
     } else {
         // Zero or near-zero range - return 0.0 (parameter has single value)
         *value = 0.0f;
@@ -819,7 +834,9 @@ int rack_au_plugin_parameter_info(
 
     // Extract parameter name
     // CFString memory note: cfNameString is owned by the AudioUnit - we copy it here
-    // and don't need to CFRelease it (AudioUnit manages the lifecycle)
+    // and don't need to CFRelease it (AudioUnit manages the lifecycle).
+    // Reference: Audio Unit Programming Guide, "Getting Parameter Information"
+    // https://developer.apple.com/library/archive/documentation/MusicAudio/Conceptual/AudioUnitProgrammingGuide/
     if (param_info.cfNameString) {
         CFStringGetCString(
             param_info.cfNameString,

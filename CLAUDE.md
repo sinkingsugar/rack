@@ -44,18 +44,18 @@ This hybrid approach allows us to:
 - Iterate fast, validate early
 - Add complexity only when needed
 
-## Current Phase: AudioUnit Scanner
+## Current Status: Phase 5 Complete
 
-**Goal:** Enumerate AudioUnit plugins on macOS
+**Completed Phases:**
+1. ✅ Phase 1: AudioUnit Scanner (C++)
+2. ✅ Phase 2: Rust FFI Integration
+3. ✅ Phase 3: Plugin Loading & Initialization
+4. ✅ Phase 4: Audio Processing (SIMD optimized)
+5. ✅ Phase 5: Parameter Control
 
-**Tasks:**
-1. ✅ Set up project structure
-2. ✅ Define Rust traits and types
-3. 🚧 Implement C++ AudioUnit scanner
-4. 🚧 Wire C++ to Rust via FFI
-5. ⏳ Test with real AudioUnit plugins
-6. ⏳ Implement plugin loading
-7. ⏳ Implement audio processing
+**Next Phase:** Phase 6 - MIDI Support
+
+See TODO.md for detailed phase breakdown and implementation status.
 
 ## Key Design Decisions
 
@@ -108,8 +108,29 @@ cmake --build . --target test
 
 ## Notes for Future Claude Sessions
 
-- This is a greenfield project, early stage
-- Focus on getting AudioUnit working first
-- Don't over-engineer - KISS principle
-- Giovanni knows C++ well, leverage that
+- This project has completed Phases 1-5 and is production-ready for AudioUnit parameter control
+- Focus continues on AudioUnit on macOS - MIDI support is next
+- KISS principle guides all design decisions
+- Giovanni (user) knows C++ well, leverage that expertise
 - Check rack/CLAUDE.md and rack-sys/CLAUDE.md for component-specific details
+- See TODO.md for current phase status and next steps
+
+## Multi-Claude Review Process
+
+This project uses a **multi-Claude feedback loop** for code quality:
+
+1. **Implementation Claude** writes the initial code and tests
+2. **Review Claude** performs detailed code review, identifying:
+   - Critical issues (memory leaks, undefined behavior, performance)
+   - Medium priority issues (documentation, edge cases, API design)
+   - Low priority enhancements (test coverage, minor improvements)
+3. **Implementation Claude** addresses all feedback systematically
+4. Process repeats until code quality standards are met
+
+**Why this works:**
+- Different Claude instances have independent perspectives
+- Catches issues that single-pass development might miss
+- Ensures thorough testing, documentation, and edge case handling
+- Results in production-ready code with comprehensive coverage
+
+**Note for Claude instances:** When you see review feedback from "another Claude", it's part of this iterative quality process. Address all issues systematically, commit fixes, and update this file if the feedback introduces new patterns or learnings.
