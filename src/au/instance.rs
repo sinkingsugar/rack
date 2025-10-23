@@ -1,4 +1,4 @@
-use crate::{Error, ParameterInfo, PluginInfo, PluginInstance, Result};
+use crate::{AudioBuffer, Error, ParameterInfo, PluginInfo, PluginInstance, Result};
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -72,7 +72,7 @@ impl PluginInstance for AudioUnitPlugin {
         }
     }
 
-    fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<()> {
+    fn process(&mut self, input: &AudioBuffer, output: &mut AudioBuffer) -> Result<()> {
         if !self.is_initialized() {
             return Err(Error::NotInitialized);
         }
@@ -321,8 +321,8 @@ mod tests {
 
         // Create test buffers (512 frames of stereo audio = 1024 samples)
         let frames = 512;
-        let mut input = vec![0.0f32; frames * 2];
-        let mut output = vec![0.0f32; frames * 2];
+        let mut input = AudioBuffer::new(frames * 2);
+        let mut output = AudioBuffer::new(frames * 2);
 
         // Fill input with a simple sine wave (440 Hz)
         let frequency = 440.0f32;

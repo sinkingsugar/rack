@@ -88,9 +88,9 @@ static OSStatus input_render_callback(
         UInt32 i = 0;
         UInt32 simd_frames = (inNumberFrames / 4) * 4;
         for (; i < simd_frames; i += 4) {
-            // Load 8 floats: L0 R0 L1 R1 L2 R2 L3 R3
-            __m128 pair0 = _mm_loadu_ps(&interleaved[i * 2]);      // L0 R0 L1 R1 (interleaved may not be aligned)
-            __m128 pair1 = _mm_loadu_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
+            // Aligned loads from Rust's 16-byte aligned AudioBuffer
+            __m128 pair0 = _mm_load_ps(&interleaved[i * 2]);      // L0 R0 L1 R1
+            __m128 pair1 = _mm_load_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
 
             // Shuffle to extract left: L0 L1 L2 L3
             __m128 left = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(2, 0, 2, 0));
@@ -475,9 +475,9 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
             // Interleave high half: L2 R2 L3 R3
             __m128 high = _mm_unpackhi_ps(left, right);
 
-            // Unaligned stores to Rust output (may not be 16-byte aligned)
-            _mm_storeu_ps(&output[i * 2], low);
-            _mm_storeu_ps(&output[i * 2 + 4], high);
+            // Aligned stores to Rust's 16-byte aligned AudioBuffer
+            _mm_store_ps(&output[i * 2], low);
+            _mm_store_ps(&output[i * 2 + 4], high);
         }
         // Handle remaining frames (scalar fallback)
         for (; i < frames; i++) {

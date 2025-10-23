@@ -51,10 +51,10 @@ fn main() -> Result<()> {
         println!("✓ Plugin initialized successfully!");
         println!();
 
-        // Create test buffers (512 frames of stereo audio = 1024 samples)
+        // Create aligned test buffers (512 frames of stereo audio = 1024 samples)
         let frames = 512;
-        let mut input = vec![0.0f32; frames * 2];
-        let mut output = vec![0.0f32; frames * 2];
+        let mut input = AudioBuffer::new(frames * 2);
+        let mut output = AudioBuffer::new(frames * 2);
 
         println!("Generating test signal (440 Hz sine wave)...");
         let frequency = 440.0f32; // A4

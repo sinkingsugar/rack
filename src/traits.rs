@@ -1,4 +1,4 @@
-use crate::{ParameterInfo, PluginInfo, Result};
+use crate::{AudioBuffer, ParameterInfo, PluginInfo, Result};
 
 /// Trait for scanning and discovering audio plugins
 pub trait PluginScanner {
@@ -21,10 +21,13 @@ pub trait PluginInstance: Send {
     fn initialize(&mut self, sample_rate: f64, max_block_size: usize) -> Result<()>;
 
     /// Process audio through the plugin
-    /// 
+    ///
+    /// Buffers must be 16-byte aligned for optimal SIMD performance.
+    /// Use `AudioBuffer` to ensure alignment.
+    ///
     /// For effects: input contains the audio to process, output receives the processed audio
     /// For instruments: input may be empty, output receives the generated audio
-    fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<()>;
+    fn process(&mut self, input: &AudioBuffer, output: &mut AudioBuffer) -> Result<()>;
 
     /// Get the number of parameters
     fn parameter_count(&self) -> usize;
