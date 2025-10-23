@@ -129,6 +129,61 @@ int rack_au_plugin_parameter_info(
 );
 
 // ============================================================================
+// Preset Management API
+// ============================================================================
+
+// Preset info struct
+typedef struct {
+    char name[256];
+    int32_t preset_number;
+} RackAUPresetInfo;
+
+// Get factory preset count
+// Returns number of factory presets, or 0 if plugin has no presets
+// Thread-safety: Read-only after initialization. Safe to call from any thread.
+int rack_au_plugin_get_preset_count(RackAUPlugin* plugin);
+
+// Get preset info by index
+// index: preset index (0 to preset_count - 1)
+// name: output buffer for preset name (allocated by caller)
+// name_size: size of name buffer
+// preset_number: output parameter for preset number (used with load_preset)
+// Returns 0 on success, negative error code on failure
+int rack_au_plugin_get_preset_info(
+    RackAUPlugin* plugin,
+    uint32_t index,
+    char* name,
+    size_t name_size,
+    int32_t* preset_number
+);
+
+// Load a factory preset by preset number
+// preset_number: the preset number from get_preset_info()
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Should be called from the same thread that owns the plugin instance.
+int rack_au_plugin_load_preset(RackAUPlugin* plugin, int32_t preset_number);
+
+// Get plugin state size (for allocation)
+// Returns size in bytes needed to store state, or 0 if state cannot be retrieved
+// Thread-safety: Read-only after initialization. Safe to call from any thread.
+int rack_au_plugin_get_state_size(RackAUPlugin* plugin);
+
+// Get plugin state (full state including parameters, preset, etc.)
+// data: output buffer for state data (allocated by caller)
+// size: input/output - buffer size on input, actual size on output
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Should be called from the same thread that owns the plugin instance.
+// Typical usage: call get_state_size() first, allocate buffer, then call get_state()
+int rack_au_plugin_get_state(RackAUPlugin* plugin, uint8_t* data, size_t* size);
+
+// Set plugin state (restore full state including parameters, preset, etc.)
+// data: state data (from previous get_state call)
+// size: size of state data in bytes
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Should be called from the same thread that owns the plugin instance.
+int rack_au_plugin_set_state(RackAUPlugin* plugin, const uint8_t* data, size_t size);
+
+// ============================================================================
 // MIDI API
 // ============================================================================
 

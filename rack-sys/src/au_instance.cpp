@@ -865,6 +865,281 @@ int rack_au_plugin_parameter_info(
 }
 
 // ============================================================================
+// Preset Management Implementation
+// ============================================================================
+
+int rack_au_plugin_get_preset_count(RackAUPlugin* plugin) {
+    if (!plugin || !plugin->initialized) {
+        return 0;
+    }
+
+    // Query factory presets
+    CFArrayRef presets = nullptr;
+    UInt32 data_size = sizeof(presets);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_FactoryPresets,
+        kAudioUnitScope_Global,
+        0,
+        &presets,
+        &data_size
+    );
+
+    if (status != noErr || !presets) {
+        return 0;  // Plugin has no factory presets
+    }
+
+    CFIndex count = CFArrayGetCount(presets);
+    // Note: presets CFArrayRef is not owned by us - don't CFRelease
+    // Reference: Audio Unit Programming Guide, "Factory Presets"
+    return static_cast<int>(count);
+}
+
+int rack_au_plugin_get_preset_info(
+    RackAUPlugin* plugin,
+    uint32_t index,
+    char* name,
+    size_t name_size,
+    int32_t* preset_number
+) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    if (!name || !preset_number) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Query factory presets
+    CFArrayRef presets = nullptr;
+    UInt32 data_size = sizeof(presets);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_FactoryPresets,
+        kAudioUnitScope_Global,
+        0,
+        &presets,
+        &data_size
+    );
+
+    if (status != noErr || !presets) {
+        return RACK_AU_ERROR_NOT_FOUND;
+    }
+
+    CFIndex count = CFArrayGetCount(presets);
+    if (index >= static_cast<uint32_t>(count)) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Get preset at index
+    // AUPreset is a struct: { presetNumber: SInt32, presetName: CFStringRef }
+    const AUPreset* preset = static_cast<const AUPreset*>(
+        CFArrayGetValueAtIndex(presets, index)
+    );
+
+    if (!preset) {
+        return RACK_AU_ERROR_GENERIC;
+    }
+
+    // Extract preset number
+    *preset_number = preset->presetNumber;
+
+    // Extract preset name
+    if (preset->presetName) {
+        CFStringGetCString(
+            preset->presetName,
+            name,
+            name_size,
+            kCFStringEncodingUTF8
+        );
+    } else {
+        // Fallback: use preset number as name
+        snprintf(name, name_size, "Preset %d", preset->presetNumber);
+    }
+
+    return RACK_AU_OK;
+}
+
+int rack_au_plugin_load_preset(RackAUPlugin* plugin, int32_t preset_number) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    // Create AUPreset struct
+    AUPreset preset;
+    preset.presetNumber = preset_number;
+    preset.presetName = nullptr;  // AudioUnit will look up name by number
+
+    // Set current preset
+    OSStatus status = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_PresentPreset,
+        kAudioUnitScope_Global,
+        0,
+        &preset,
+        sizeof(preset)
+    );
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    return RACK_AU_OK;
+}
+
+int rack_au_plugin_get_state_size(RackAUPlugin* plugin) {
+    if (!plugin || !plugin->initialized) {
+        return 0;
+    }
+
+    // Query ClassInfo (full plugin state as CFPropertyList)
+    CFPropertyListRef class_info = nullptr;
+    UInt32 data_size = sizeof(class_info);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ClassInfo,
+        kAudioUnitScope_Global,
+        0,
+        &class_info,
+        &data_size
+    );
+
+    if (status != noErr || !class_info) {
+        return 0;
+    }
+
+    // Serialize to binary data to determine size
+    CFDataRef data = CFPropertyListCreateData(
+        kCFAllocatorDefault,
+        class_info,
+        kCFPropertyListBinaryFormat_v1_0,
+        0,  // options
+        nullptr  // error
+    );
+
+    CFRelease(class_info);  // We own class_info, must release
+
+    if (!data) {
+        return 0;
+    }
+
+    CFIndex size = CFDataGetLength(data);
+    CFRelease(data);
+
+    return static_cast<int>(size);
+}
+
+int rack_au_plugin_get_state(RackAUPlugin* plugin, uint8_t* data, size_t* size) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    if (!data || !size) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Query ClassInfo (full plugin state)
+    CFPropertyListRef class_info = nullptr;
+    UInt32 data_size = sizeof(class_info);
+    OSStatus status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ClassInfo,
+        kAudioUnitScope_Global,
+        0,
+        &class_info,
+        &data_size
+    );
+
+    if (status != noErr || !class_info) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    // Serialize to binary data
+    CFDataRef cf_data = CFPropertyListCreateData(
+        kCFAllocatorDefault,
+        class_info,
+        kCFPropertyListBinaryFormat_v1_0,
+        0,  // options
+        nullptr  // error
+    );
+
+    CFRelease(class_info);  // We own class_info, must release
+
+    if (!cf_data) {
+        return RACK_AU_ERROR_GENERIC;
+    }
+
+    // Copy data to output buffer
+    CFIndex cf_size = CFDataGetLength(cf_data);
+    if (static_cast<size_t>(cf_size) > *size) {
+        CFRelease(cf_data);
+        return RACK_AU_ERROR_GENERIC;  // Buffer too small
+    }
+
+    const UInt8* bytes = CFDataGetBytePtr(cf_data);
+    memcpy(data, bytes, cf_size);
+    *size = cf_size;
+
+    CFRelease(cf_data);
+
+    return RACK_AU_OK;
+}
+
+int rack_au_plugin_set_state(RackAUPlugin* plugin, const uint8_t* data, size_t size) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    if (!data || size == 0) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Create CFData from input buffer
+    CFDataRef cf_data = CFDataCreate(
+        kCFAllocatorDefault,
+        data,
+        size
+    );
+
+    if (!cf_data) {
+        return RACK_AU_ERROR_GENERIC;
+    }
+
+    // Deserialize CFPropertyList from binary data
+    CFPropertyListRef class_info = CFPropertyListCreateWithData(
+        kCFAllocatorDefault,
+        cf_data,
+        kCFPropertyListImmutable,
+        nullptr,  // format (output)
+        nullptr   // error
+    );
+
+    CFRelease(cf_data);
+
+    if (!class_info) {
+        return RACK_AU_ERROR_GENERIC;  // Failed to deserialize
+    }
+
+    // Restore plugin state
+    OSStatus status = AudioUnitSetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_ClassInfo,
+        kAudioUnitScope_Global,
+        0,
+        &class_info,
+        sizeof(class_info)
+    );
+
+    CFRelease(class_info);  // We own class_info, must release
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    return RACK_AU_OK;
+}
+
+// ============================================================================
 // MIDI Implementation
 // ============================================================================
 

@@ -114,3 +114,27 @@ impl ParameterInfo {
         }
     }
 }
+
+/// Information about a plugin preset
+#[derive(Debug, Clone)]
+pub struct PresetInfo {
+    /// Preset index (for enumeration)
+    pub index: usize,
+
+    /// Preset name
+    pub name: String,
+
+    /// Preset number (AudioUnit-specific identifier used for loading)
+    pub preset_number: i32,
+}
+
+impl PresetInfo {
+    /// Create a new PresetInfo
+    pub fn new(index: usize, name: String, preset_number: i32) -> Self {
+        Self {
+            index,
+            name,
+            preset_number,
+        }
+    }
+}

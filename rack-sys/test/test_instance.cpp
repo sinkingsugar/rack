@@ -675,6 +675,226 @@ void test_midi_operations() {
     std::cout << "\n";
 }
 
+void test_preset_operations() {
+    std::cout << "Test 7: Preset operations\n";
+    std::cout << "--------------------------\n";
+
+    // Scan for a plugin to test with
+    RackAUScanner* scanner = rack_au_scanner_new();
+    if (!scanner) {
+        std::cerr << "FAIL: Failed to create scanner\n";
+        return;
+    }
+
+    int count = rack_au_scanner_scan(scanner, nullptr, 0);
+    if (count <= 0) {
+        std::cerr << "SKIP: No plugins found to test with\n\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    RackAUPluginInfo* plugins = new(std::nothrow) RackAUPluginInfo[count];
+    if (!plugins) {
+        std::cerr << "FAIL: Failed to allocate memory\n";
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int filled = rack_au_scanner_scan(scanner, plugins, count);
+    if (filled <= 0) {
+        std::cerr << "FAIL: Failed to scan plugins\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Find an effect or instrument plugin (more likely to have presets)
+    const char* unique_id = nullptr;
+    const char* plugin_name = nullptr;
+    for (int i = 0; i < filled; i++) {
+        if (plugins[i].plugin_type == RACK_AU_TYPE_EFFECT ||
+            plugins[i].plugin_type == RACK_AU_TYPE_INSTRUMENT) {
+            unique_id = plugins[i].unique_id;
+            plugin_name = plugins[i].name;
+            break;
+        }
+    }
+
+    if (!unique_id) {
+        std::cout << "SKIP: No suitable plugins found for preset test\n\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "Testing presets with: " << plugin_name << "\n";
+
+    // Create and initialize plugin
+    RackAUPlugin* plugin = rack_au_plugin_new(unique_id);
+    if (!plugin) {
+        std::cerr << "FAIL: Failed to create plugin instance\n";
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    int result = rack_au_plugin_initialize(plugin, 48000.0, 512);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to initialize plugin (error: " << result << ")\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    // Test preset count
+    int preset_count = rack_au_plugin_get_preset_count(plugin);
+    std::cout << "  Preset count: " << preset_count << "\n";
+    std::cout << "PASS: Preset count retrieved\n";
+
+    if (preset_count == 0) {
+        std::cout << "  Plugin has no presets, skipping preset load test\n";
+    } else {
+        // Test preset info
+        char name[256];
+        int32_t preset_number = 0;
+
+        result = rack_au_plugin_get_preset_info(plugin, 0, name, sizeof(name), &preset_number);
+        if (result != RACK_AU_OK) {
+            std::cerr << "FAIL: Failed to get preset info (error: " << result << ")\n";
+            rack_au_plugin_free(plugin);
+            delete[] plugins;
+            rack_au_scanner_free(scanner);
+            return;
+        }
+
+        std::cout << "  Preset 0: " << name << " (number: " << preset_number << ")\n";
+        std::cout << "PASS: Preset info retrieved\n";
+
+        // Test loading a preset
+        result = rack_au_plugin_load_preset(plugin, preset_number);
+        if (result != RACK_AU_OK) {
+            std::cerr << "FAIL: Failed to load preset (error: " << result << ")\n";
+            rack_au_plugin_free(plugin);
+            delete[] plugins;
+            rack_au_scanner_free(scanner);
+            return;
+        }
+
+        std::cout << "PASS: Preset loaded successfully\n";
+
+        // Test out of bounds index
+        result = rack_au_plugin_get_preset_info(plugin, preset_count + 10, name, sizeof(name), &preset_number);
+        if (result == RACK_AU_OK) {
+            std::cerr << "FAIL: Should fail for out-of-bounds preset index\n";
+            rack_au_plugin_free(plugin);
+            delete[] plugins;
+            rack_au_scanner_free(scanner);
+            return;
+        }
+        std::cout << "PASS: Out-of-bounds preset index rejected\n";
+    }
+
+    // Test state serialization (all plugins should support this)
+    int state_size = rack_au_plugin_get_state_size(plugin);
+    if (state_size <= 0) {
+        std::cerr << "FAIL: Failed to get state size\n";
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "  State size: " << state_size << " bytes\n";
+    std::cout << "PASS: State size retrieved\n";
+
+    // Allocate buffer for state
+    uint8_t* state_data = new uint8_t[state_size];
+    size_t actual_size = state_size;
+
+    // Get state
+    result = rack_au_plugin_get_state(plugin, state_data, &actual_size);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to get state (error: " << result << ")\n";
+        delete[] state_data;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "  Actual state size: " << actual_size << " bytes\n";
+    std::cout << "PASS: State retrieved\n";
+
+    // Modify plugin state (if it has parameters)
+    int param_count = rack_au_plugin_parameter_count(plugin);
+    float original_param_value = 0.0f;
+    if (param_count > 0) {
+        // Save original parameter value
+        rack_au_plugin_get_parameter(plugin, 0, &original_param_value);
+
+        // Change parameter
+        rack_au_plugin_set_parameter(plugin, 0, 0.99f);
+
+        // Verify change
+        float new_value = 0.0f;
+        rack_au_plugin_get_parameter(plugin, 0, &new_value);
+        std::cout << "  Modified parameter 0: " << original_param_value << " -> " << new_value << "\n";
+    }
+
+    // Restore state
+    result = rack_au_plugin_set_state(plugin, state_data, actual_size);
+    if (result != RACK_AU_OK) {
+        std::cerr << "FAIL: Failed to restore state (error: " << result << ")\n";
+        delete[] state_data;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+
+    std::cout << "PASS: State restored\n";
+
+    // Verify parameter was restored (if plugin has parameters)
+    if (param_count > 0) {
+        float restored_value = 0.0f;
+        rack_au_plugin_get_parameter(plugin, 0, &restored_value);
+
+        if (std::abs(restored_value - original_param_value) > 0.01f) {
+            std::cerr << "FAIL: Parameter not restored correctly (expected " << original_param_value
+                      << ", got " << restored_value << ")\n";
+            delete[] state_data;
+            rack_au_plugin_free(plugin);
+            delete[] plugins;
+            rack_au_scanner_free(scanner);
+            return;
+        }
+
+        std::cout << "  Parameter 0 restored to: " << restored_value << "\n";
+        std::cout << "PASS: Parameter restored correctly\n";
+    }
+
+    // Test invalid state data
+    result = rack_au_plugin_set_state(plugin, nullptr, 0);
+    if (result == RACK_AU_OK) {
+        std::cerr << "FAIL: Should reject null state data\n";
+        delete[] state_data;
+        rack_au_plugin_free(plugin);
+        delete[] plugins;
+        rack_au_scanner_free(scanner);
+        return;
+    }
+    std::cout << "PASS: Null state data rejected\n";
+
+    // Cleanup
+    delete[] state_data;
+    rack_au_plugin_free(plugin);
+    delete[] plugins;
+    rack_au_scanner_free(scanner);
+
+    std::cout << "\n";
+}
+
 int main() {
     std::cout << "AudioUnit Plugin Instance Test\n";
     std::cout << "===============================\n\n";
@@ -685,6 +905,7 @@ int main() {
     test_audio_processing();
     test_parameter_operations();
     test_midi_operations();
+    test_preset_operations();
 
     std::cout << "All tests completed!\n";
     return 0;
