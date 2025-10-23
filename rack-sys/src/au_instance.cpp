@@ -887,7 +887,7 @@ int rack_au_plugin_send_midi(
     }
 
     // Send each MIDI event to the AudioUnit
-    // Using MusicDeviceMIDIEvent for simplicity (sample-accurate timing can be added later)
+    // Using MusicDeviceMIDIEvent for sample-accurate timing via event->sample_offset
     for (uint32_t i = 0; i < event_count; i++) {
         const RackAUMidiEvent* event = &events[i];
 

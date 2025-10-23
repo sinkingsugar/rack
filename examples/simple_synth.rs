@@ -24,7 +24,13 @@ fn main() -> Result<()> {
     let synth_info = plugins
         .iter()
         .find(|p| p.plugin_type == PluginType::Instrument)
-        .ok_or_else(|| Error::Other("No instrument plugins found".to_string()))?;
+        .ok_or_else(|| Error::Other(
+            "No instrument plugins found. Install a synthesizer AudioUnit to run this example.\n\
+             macOS includes DLSMusicDevice by default. You can also install free synths like:\n\
+             - Dexed (DX7 emulator)\n\
+             - Surge XT\n\
+             - Vital".to_string()
+        ))?;
 
     println!("Using instrument: {}", synth_info.name);
     println!("Manufacturer: {}", synth_info.manufacturer);

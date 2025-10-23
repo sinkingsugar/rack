@@ -2,6 +2,28 @@
 //!
 //! This module provides safe, idiomatic Rust types for MIDI events.
 //! These are converted to FFI types when sending to plugin instances.
+//!
+//! ## Supported MIDI Messages
+//!
+//! Phase 6 implements the most common MIDI messages for instrument control:
+//!
+//! - **Note On/Off** - Trigger and release notes with velocity
+//! - **Control Change (CC)** - Modulation, expression, pedals, etc.
+//! - **Program Change** - Switch between instrument patches
+//!
+//! ## Planned for Future Phases
+//!
+//! Additional MIDI message types will be added in Phase 6.1 or Phase 9:
+//!
+//! - **Pitch Bend** - Continuous pitch modulation (very common in synthesizers)
+//! - **Aftertouch** - Pressure sensitivity (polyphonic and channel)
+//! - **System Messages** - MIDI clock, start/stop for sequencers
+//!
+//! ## Sample-Accurate Timing
+//!
+//! All events support sample-accurate timing via the `sample_offset` field,
+//! which specifies the frame offset within the current audio buffer where
+//! the event should be applied (0 = start of buffer).
 
 /// A MIDI event with sample-accurate timing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -49,6 +49,25 @@ pub trait PluginInstance: Send {
     /// Events are processed immediately. For sample-accurate timing,
     /// set the `sample_offset` field in each event.
     ///
+    /// # Performance Note
+    ///
+    /// This method allocates memory to convert events to FFI format.
+    /// For real-time audio threads with strict latency requirements,
+    /// consider sending MIDI events from a separate thread or using
+    /// a pre-allocated event queue.
+    ///
+    /// # MIDI Message Support
+    ///
+    /// Currently supports:
+    /// - Note On/Off
+    /// - Control Change (CC)
+    /// - Program Change
+    ///
+    /// Not yet supported (planned for future phases):
+    /// - Pitch Bend
+    /// - Aftertouch (polyphonic and channel)
+    /// - System messages (clock, start/stop)
+    ///
     /// # Arguments
     ///
     /// * `events` - Slice of MIDI events to send
