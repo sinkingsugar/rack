@@ -215,6 +215,8 @@ impl PluginInstance for AudioUnitPlugin {
                         (ffi::RackAUMidiEventType::ControlChange as u8, controller, value, channel)
                     }
                     MidiEventKind::ProgramChange { program, channel } => {
+                        // Program Change only has 1 data byte (program number)
+                        // data2 is 0 because MIDI Program Change messages don't use it
                         (ffi::RackAUMidiEventType::ProgramChange as u8, program, 0, channel)
                     }
                 };

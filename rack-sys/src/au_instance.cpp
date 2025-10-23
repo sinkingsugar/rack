@@ -897,8 +897,9 @@ int rack_au_plugin_send_midi(
         }
 
         // Combine status byte with channel
+        // Clear any channel bits from status (use upper nibble only), then combine with channel
         // Status byte upper nibble (0x90, 0x80, etc.) + channel lower nibble (0-15)
-        uint8_t status = event->status | (event->channel & 0x0F);
+        uint8_t status = (event->status & 0xF0) | (event->channel & 0x0F);
 
         // Send MIDI event to AudioUnit
         // MusicDeviceMIDIEvent is the primary API for sending MIDI to instrument plugins
@@ -908,7 +909,7 @@ int rack_au_plugin_send_midi(
             status,
             event->data1,
             event->data2,
-            0  // Sample offset (0 = immediate, can be enhanced later for sample-accurate timing)
+            event->sample_offset  // Sample offset within buffer for sample-accurate timing
         );
 
         // Note: Some effect plugins don't support MIDI, so we check the error

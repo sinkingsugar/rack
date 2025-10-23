@@ -59,7 +59,7 @@ impl MidiEvent {
     /// * `note` - MIDI note number (0-127, clamped if out of range)
     /// * `velocity` - Note velocity (0-127, clamped if out of range)
     /// * `channel` - MIDI channel (0-15, clamped if out of range)
-    /// * `sample_offset` - Sample offset within buffer (default: 0)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
     ///
     /// # Examples
     ///
@@ -87,7 +87,7 @@ impl MidiEvent {
     /// * `note` - MIDI note number (0-127, clamped if out of range)
     /// * `velocity` - Release velocity (0-127, clamped if out of range)
     /// * `channel` - MIDI channel (0-15, clamped if out of range)
-    /// * `sample_offset` - Sample offset within buffer (default: 0)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
     ///
     /// # Examples
     ///
@@ -115,7 +115,7 @@ impl MidiEvent {
     /// * `controller` - Controller number (0-127, clamped if out of range)
     /// * `value` - Controller value (0-127, clamped if out of range)
     /// * `channel` - MIDI channel (0-15, clamped if out of range)
-    /// * `sample_offset` - Sample offset within buffer (default: 0)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
     ///
     /// # Examples
     ///
@@ -142,7 +142,7 @@ impl MidiEvent {
     ///
     /// * `program` - Program number (0-127, clamped if out of range)
     /// * `channel` - MIDI channel (0-15, clamped if out of range)
-    /// * `sample_offset` - Sample offset within buffer (default: 0)
+    /// * `sample_offset` - Sample offset within buffer (0 = start of buffer)
     ///
     /// # Examples
     ///
