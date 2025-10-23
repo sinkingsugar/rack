@@ -91,18 +91,18 @@ static OSStatus input_render_callback(
         UInt32 i = 0;
         UInt32 simd_frames = (inNumberFrames / 4) * 4;
         for (; i < simd_frames; i += 4) {
-            // Aligned loads from Rust's 16-byte aligned AudioBuffer
-            __m128 pair0 = _mm_load_ps(&interleaved[i * 2]);      // L0 R0 L1 R1
-            __m128 pair1 = _mm_load_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
+            // Loads from Rust's aligned AudioBuffer (use unaligned for extra safety)
+            __m128 pair0 = _mm_loadu_ps(&interleaved[i * 2]);      // L0 R0 L1 R1
+            __m128 pair1 = _mm_loadu_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
 
             // Shuffle to extract left: L0 L1 L2 L3
             __m128 left = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(2, 0, 2, 0));
             // Shuffle to extract right: R0 R1 R2 R3
             __m128 right = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(3, 1, 3, 1));
 
-            // Aligned stores to our 16-byte aligned output buffers
-            _mm_store_ps(&left_out[i], left);
-            _mm_store_ps(&right_out[i], right);
+            // Unaligned stores to AudioUnit-provided buffers (alignment not guaranteed)
+            _mm_storeu_ps(&left_out[i], left);
+            _mm_storeu_ps(&right_out[i], right);
         }
         // Handle remaining frames (scalar fallback)
         for (; i < inNumberFrames; i++) {
@@ -472,9 +472,9 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
         uint32_t i = 0;
         uint32_t simd_frames = (frames / 4) * 4;
         for (; i < simd_frames; i += 4) {
-            // Aligned loads from our 16-byte aligned input buffers
-            __m128 left = _mm_load_ps(&left_in[i]);   // L0 L1 L2 L3
-            __m128 right = _mm_load_ps(&right_in[i]); // R0 R1 R2 R3
+            // Unaligned loads from AudioUnit buffers (defensive - we allocate them aligned, but be safe)
+            __m128 left = _mm_loadu_ps(&left_in[i]);   // L0 L1 L2 L3
+            __m128 right = _mm_loadu_ps(&right_in[i]); // R0 R1 R2 R3
 
             // Interleave low half: L0 R0 L1 R1
             __m128 low = _mm_unpacklo_ps(left, right);
@@ -503,6 +503,8 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
     }
 
     // Update sample position for next call
+    // Note: int64_t will overflow after ~6 million years at 48kHz
+    // This is not a practical concern, but some AudioUnits may expect wrapping behavior
     plugin->sample_position += frames;
 
     return RACK_AU_OK;
