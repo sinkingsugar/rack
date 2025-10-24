@@ -303,3 +303,12 @@ Rack now provides complete AudioUnit hosting capabilities:
 - ✅ GUI support (AUv3/AUv2/generic fallback)
 
 **Next Priority**: Phase 9 (Advanced Features) or Phase 10 (Additional Plugin Formats)
+
+## 📝 Recent Updates
+
+**2025-10-24**: Phase 8 (GUI Support) merged to main
+- Complete AUv3/AUv2/Generic UI support
+- Interactive parameter sliders in generic UI
+- Critical thread-safety fixes (global mutex for AudioUnit lifecycle)
+- All memory safety issues addressed
+- Production-ready GUI hosting
