@@ -12,10 +12,31 @@ struct RackAUGui {
     NSViewController* view_controller;  // For AUv3
     NSView* view;                      // For AUv2 or generic UI
     NSWindow* window;                  // Optional window for standalone display
+    NSMutableArray* slider_targets;     // For generic UI - keeps slider targets alive
     bool owns_view_controller;         // Track ownership for cleanup
     bool owns_view;
     char error_message[256];
 };
+
+// Helper class for generic UI slider callbacks
+@interface RackAUSliderTarget : NSObject
+@property (assign) AudioComponentInstance audioUnit;
+@property (assign) AudioUnitParameterID parameterID;
+@property (weak) NSTextField* valueLabel;
+- (void)sliderChanged:(NSSlider*)slider;
+@end
+
+@implementation RackAUSliderTarget
+- (void)sliderChanged:(NSSlider*)slider {
+    AudioUnitParameterValue value = [slider doubleValue];
+    AudioUnitSetParameter(self.audioUnit, self.parameterID, kAudioUnitScope_Global, 0, value, 0);
+
+    // Update value label
+    if (self.valueLabel) {
+        [self.valueLabel setStringValue:[NSString stringWithFormat:@"%.2f", value]];
+    }
+}
+@end
 
 // Callback type for async GUI creation
 typedef void (*RackAUGuiCallback)(void* user_data, RackAUGui* gui, int error_code);
@@ -84,8 +105,9 @@ static bool get_parameter_info(
 }
 
 // Create generic parameter UI using NSStackView
-static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
+static NSView* create_generic_ui(AudioComponentInstance audio_unit, NSMutableArray** out_targets) {
     @autoreleasepool {
+        NSMutableArray* targets = [[NSMutableArray alloc] init];
         UInt32 param_count = get_parameter_count(audio_unit);
 
         if (param_count == 0) {
@@ -160,13 +182,6 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
             AudioUnitGetParameter(audio_unit, param_id, kAudioUnitScope_Global, 0, &currentValue);
             [slider setDoubleValue:currentValue];
 
-            // NOTE: Generic UI is read-only (sliders don't update plugin parameters)
-            // Most plugins use AUv3/AUv2 custom UIs with bidirectional parameter sync
-            // Generic UI is a fallback for plugins with no custom view
-            // TODO (Phase 9): Implement slider callbacks with AudioUnitSetParameter
-            [slider setTarget:nil];
-            [slider setAction:nil];
-
             // Value label (fixed width)
             NSTextField* valueLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 80, 24)];
             [valueLabel setStringValue:[NSString stringWithFormat:@"%.2f", currentValue]];
@@ -175,6 +190,17 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
             [valueLabel setEditable:NO];
             [valueLabel setSelectable:NO];
             [valueLabel setAlignment:NSTextAlignmentLeft];
+
+            // Wire up slider to update parameter
+            RackAUSliderTarget* target = [[RackAUSliderTarget alloc] init];
+            target.audioUnit = audio_unit;
+            target.parameterID = param_id;
+            target.valueLabel = valueLabel;
+            [slider setTarget:target];
+            [slider setAction:@selector(sliderChanged:)];
+
+            // Store target to keep it alive
+            [targets addObject:target];
 
             // Add to row
             [rowView addView:nameLabel inGravity:NSStackViewGravityLeading];
@@ -190,6 +216,11 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
         // Set stack view size
         NSSize contentSize = [stackView fittingSize];
         [stackView setFrameSize:contentSize];
+
+        // Return targets array
+        if (out_targets) {
+            *out_targets = targets;
+        }
 
         return stackView;
     }
@@ -351,6 +382,7 @@ void rack_au_gui_create_async(
                     gui->view_controller = viewController;
                     gui->view = viewController.view;
                     gui->window = nil;
+                    gui->slider_targets = nil;  // No slider targets for AUv3
                     gui->owns_view_controller = true;
                     gui->owns_view = false;  // View is owned by view controller
                     gui->error_message[0] = '\0';
@@ -367,6 +399,7 @@ void rack_au_gui_create_async(
                         gui->view_controller = nil;
                         gui->view = auv2_view;
                         gui->window = nil;
+                        gui->slider_targets = nil;  // No slider targets for AUv2
                         gui->owns_view_controller = false;
                         gui->owns_view = true;
                         gui->error_message[0] = '\0';
@@ -374,13 +407,15 @@ void rack_au_gui_create_async(
                         callback(user_data, gui, RACK_AU_OK);
                     } else {
                         // Both AUv3 and AUv2 failed, create generic parameter UI as fallback
-                        NSView* generic_view = create_generic_ui(audio_unit);
-
                         RackAUGui* gui = new RackAUGui();
+                        NSMutableArray* targets = nil;
+                        NSView* generic_view = create_generic_ui(audio_unit, &targets);
+
                         gui->audio_unit = audio_unit;
                         gui->view_controller = nil;
                         gui->view = generic_view;
                         gui->window = nil;
+                        gui->slider_targets = targets;
                         gui->owns_view_controller = false;
                         gui->owns_view = true;
                         gui->error_message[0] = '\0';
@@ -419,6 +454,11 @@ void rack_au_gui_destroy(RackAUGui* gui) {
             if (gui->owns_view && gui->view != nil) {
                 [gui->view removeFromSuperview];
                 gui->view = nil;  // ARC will handle cleanup
+            }
+
+            // Clean up slider targets (generic UI)
+            if (gui->slider_targets != nil) {
+                gui->slider_targets = nil;  // ARC will handle cleanup
             }
 
             delete gui;

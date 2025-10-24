@@ -248,8 +248,8 @@ typedef void (*RackAUGuiCallback)(void* user_data, RackAUGui* gui, int error_cod
 //
 // Generic UI fallback:
 //   - Displays up to 20 parameters with sliders
-//   - Read-only (sliders show values but don't update plugin)
-//   - Most plugins provide AUv3/AUv2 custom UIs with bidirectional sync
+//   - Bidirectional: sliders update plugin parameters in real-time
+//   - Most plugins provide AUv3/AUv2 custom UIs with richer features
 //
 // IMPORTANT: This function must be called from the main thread
 // The callback will also be invoked on the main thread
