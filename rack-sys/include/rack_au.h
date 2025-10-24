@@ -11,6 +11,7 @@ extern "C" {
 // Opaque types
 typedef struct RackAUScanner RackAUScanner;
 typedef struct RackAUPlugin RackAUPlugin;
+typedef struct RackAUGui RackAUGui;
 
 // Plugin type enum
 typedef enum {
@@ -231,8 +232,88 @@ int rack_au_plugin_send_midi(
     uint32_t event_count
 );
 
+// ============================================================================
+// GUI API
+// ============================================================================
+
+// Callback type for async GUI creation
+// user_data: user-provided data passed to rack_au_gui_create_async
+// gui: created GUI handle, or NULL on error
+// error_code: RACK_AU_OK on success, negative error code on failure
+typedef void (*RackAUGuiCallback)(void* user_data, RackAUGui* gui, int error_code);
+
+// Create GUI asynchronously
+// Tries AUv3 (modern) → AUv2 (legacy) → generic parameter UI in order
+// Callback is invoked on main thread when GUI is ready or creation fails
+//
+// IMPORTANT: This function must be called from the main thread
+// The callback will also be invoked on the main thread
+//
+// plugin: plugin instance (must be initialized)
+// callback: callback function to invoke when GUI is ready
+// user_data: user data to pass to callback
+//
+// Thread-safety: Must be called from main thread. GUI operations are not thread-safe.
+void rack_au_gui_create_async(
+    RackAUPlugin* plugin,
+    RackAUGuiCallback callback,
+    void* user_data
+);
+
+// Destroy GUI and clean up resources
+// gui: GUI handle returned by rack_au_gui_create_async
+// Thread-safety: Should be called from main thread
+void rack_au_gui_destroy(RackAUGui* gui);
+
+// Get native NSView pointer for embedding in host UI
+// Returns void* that can be cast to NSView* in Objective-C/Swift code
+// gui: GUI handle
+// Returns: NSView pointer as void*, or NULL if gui is invalid
+// Thread-safety: Can be called from any thread (read-only operation)
+void* rack_au_gui_get_view(RackAUGui* gui);
+
+// Get view size
+// gui: GUI handle
+// width: output parameter for view width
+// height: output parameter for view height
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Can be called from any thread
+int rack_au_gui_get_size(RackAUGui* gui, float* width, float* height);
+
+// Create and show window with GUI
+// Creates an NSWindow and displays the plugin GUI in it
+// gui: GUI handle
+// title: window title (or NULL for default "AudioUnit GUI")
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Must be called from main thread
+int rack_au_gui_show_window(RackAUGui* gui, const char* title);
+
+// Hide window (without destroying GUI)
+// gui: GUI handle
+// Returns 0 on success, negative error code on failure
+// Thread-safety: Must be called from main thread
+int rack_au_gui_hide_window(RackAUGui* gui);
+
 #ifdef __cplusplus
 }
+#endif
+
+// ============================================================================
+// Internal Helper (used by au_gui.mm)
+// ============================================================================
+
+#ifdef __OBJC__
+// Get AudioComponentInstance from plugin (internal use only)
+// Used by au_gui.mm to access the audio unit from opaque plugin handle
+// Only available in Objective-C++ where AudioToolbox types are available
+#include <AudioToolbox/AudioToolbox.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+AudioComponentInstance rack_au_plugin_get_audio_unit(RackAUPlugin* plugin);
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 #endif // RACK_AU_H

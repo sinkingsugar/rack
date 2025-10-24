@@ -6,10 +6,21 @@ fn main() {
 
         // Build rack-sys with CMake using explicit configuration
         let target = env::var("TARGET").unwrap();
-        let dst = cmake::Config::new("rack-sys")
+
+        // Check if ASAN should be enabled
+        let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
+
+        let mut config = cmake::Config::new("rack-sys");
+        config
             .define("CMAKE_BUILD_TYPE", "Release")
-            .define("BUILD_TESTS", "OFF") // Don't build C++ tests in Rust build
-            .build();
+            .define("BUILD_TESTS", "OFF"); // Don't build C++ tests in Rust build
+
+        if enable_asan {
+            config.define("ENABLE_ASAN", "ON");
+            eprintln!("Building with AddressSanitizer enabled");
+        }
+
+        let dst = config.build();
 
         // Library name comes from CMake configuration (librack_sys.a)
         let lib_name = "rack_sys";
@@ -22,10 +33,20 @@ fn main() {
         // Use libc++ on macOS (default for clang)
         println!("cargo:rustc-link-lib=c++");
 
+        // Link ASAN runtime if enabled
+        if enable_asan {
+            println!("cargo:rustc-link-arg=-fsanitize=address");
+            println!("cargo:rustc-link-arg=-fno-optimize-sibling-calls");
+            println!("cargo:rustc-link-arg=-fsanitize-address-use-after-scope");
+            println!("cargo:rustc-link-arg=-fno-omit-frame-pointer");
+        }
+
         // Link required macOS frameworks for AudioUnit API
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
         println!("cargo:rustc-link-lib=framework=CoreAudio");
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
+        println!("cargo:rustc-link-lib=framework=CoreAudioKit");
+        println!("cargo:rustc-link-lib=framework=AppKit");
 
         // Rerun build script if C++ sources, headers, or build config changes
         println!("cargo:rerun-if-changed=rack-sys/src");

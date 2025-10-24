@@ -58,7 +58,7 @@ pub mod au;
 
 // Re-export the default scanner and plugin types for the platform
 #[cfg(target_os = "macos")]
-pub use au::{AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
+pub use au::{AudioUnitGui, AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -68,5 +68,5 @@ pub mod prelude {
     };
 
     #[cfg(target_os = "macos")]
-    pub use crate::{Plugin, Scanner};
+    pub use crate::{AudioUnitGui, Plugin, Scanner};
 }

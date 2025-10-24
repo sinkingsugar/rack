@@ -18,6 +18,11 @@ pub struct RackAUPlugin {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+pub struct RackAUGui {
+    _private: [u8; 0],
+}
+
 // Plugin type enum
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,4 +435,120 @@ pub struct RackAUMidiEvent {
     pub data1: u8,
     pub data2: u8,
     pub channel: u8,
+}
+
+// ============================================================================
+// GUI FFI Types and Functions
+// ============================================================================
+
+/// Callback type for async GUI creation
+///
+/// # Parameters
+///
+/// - `user_data`: User-provided data passed to `rack_au_gui_create_async`
+/// - `gui`: Created GUI handle, or NULL on error
+/// - `error_code`: RACK_AU_OK on success, negative error code on failure
+pub type RackAUGuiCallback = extern "C" fn(user_data: *mut std::ffi::c_void, gui: *mut RackAUGui, error_code: c_int);
+
+extern "C" {
+    // ============================================================================
+    // GUI API
+    // ============================================================================
+
+    /// Create GUI asynchronously
+    ///
+    /// Tries AUv3 (modern) → AUv2 (legacy) → generic parameter UI in order.
+    /// Callback is invoked on main thread when GUI is ready or creation fails.
+    ///
+    /// **IMPORTANT**: This function must be called from the main thread.
+    /// The callback will also be invoked on the main thread.
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized
+    /// - `callback` must be a valid function pointer
+    /// - `user_data` can be any pointer (will be passed to callback)
+    /// - Must be called from main thread
+    /// - Callback will be invoked on main thread
+    pub fn rack_au_gui_create_async(
+        plugin: *mut RackAUPlugin,
+        callback: RackAUGuiCallback,
+        user_data: *mut std::ffi::c_void,
+    );
+
+    /// Destroy GUI and clean up resources
+    ///
+    /// # Safety
+    ///
+    /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
+    /// - Should be called from main thread
+    /// - `gui` must not be used after this call
+    /// - If `gui` is NULL, this function does nothing (safe no-op)
+    pub fn rack_au_gui_destroy(gui: *mut RackAUGui);
+
+    /// Get native NSView pointer for embedding in host UI
+    ///
+    /// Returns void* that can be cast to NSView* in Objective-C/Swift code.
+    ///
+    /// # Returns
+    ///
+    /// - NSView pointer as void*, or NULL if gui is invalid
+    ///
+    /// # Safety
+    ///
+    /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
+    /// - Can be called from any thread (read-only operation)
+    /// - Returned pointer is valid until `rack_au_gui_destroy` is called
+    pub fn rack_au_gui_get_view(gui: *mut RackAUGui) -> *mut std::ffi::c_void;
+
+    /// Get view size
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success (width and height written to output pointers)
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
+    /// - `width` and `height` must be valid pointers to f32
+    /// - Can be called from any thread
+    pub fn rack_au_gui_get_size(
+        gui: *mut RackAUGui,
+        width: *mut f32,
+        height: *mut f32,
+    ) -> c_int;
+
+    /// Create and show window with GUI
+    ///
+    /// Creates an NSWindow and displays the plugin GUI in it.
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
+    /// - `title` can be NULL for default title, or must point to null-terminated C string
+    /// - Must be called from main thread
+    pub fn rack_au_gui_show_window(
+        gui: *mut RackAUGui,
+        title: *const c_char,
+    ) -> c_int;
+
+    /// Hide window (without destroying GUI)
+    ///
+    /// # Returns
+    ///
+    /// - 0 on success
+    /// - Negative error code on failure
+    ///
+    /// # Safety
+    ///
+    /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
+    /// - Must be called from main thread
+    pub fn rack_au_gui_hide_window(gui: *mut RackAUGui) -> c_int;
 }

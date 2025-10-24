@@ -594,6 +594,105 @@ impl AudioUnitPlugin {
             Ok(())
         }
     }
+
+    /// Create GUI asynchronously
+    ///
+    /// Creates the plugin's graphical user interface. This function tries multiple
+    /// strategies in order:
+    /// 1. AUv3 modern GUI (requestViewController)
+    /// 2. AUv2 legacy GUI (kAudioUnitProperty_CocoaUI)
+    /// 3. Generic parameter UI (fallback)
+    ///
+    /// The callback is invoked on the main thread when the GUI is ready.
+    ///
+    /// # Parameters
+    ///
+    /// - `callback`: Closure invoked when GUI creation completes. Receives
+    ///   `Ok(AudioUnitGui)` on success or `Err(Error)` on failure.
+    ///
+    /// # Thread Safety
+    ///
+    /// **MUST be called from the main thread.** This is a macOS/AppKit requirement.
+    /// The callback will also be invoked on the main thread.
+    ///
+    /// # Errors
+    ///
+    /// The callback receives an error if:
+    /// - Plugin is not initialized
+    /// - GUI creation fails (rare - generic UI is always available as fallback)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    ///
+    /// plugin.create_gui(|result| {
+    ///     match result {
+    ///         Ok(gui) => {
+    ///             println!("GUI created!");
+    ///             gui.show_window(Some("My Plugin"))?;
+    ///         }
+    ///         Err(e) => {
+    ///             eprintln!("GUI creation failed: {}", e);
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// });
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn create_gui<F>(&mut self, callback: F)
+    where
+        F: FnOnce(Result<super::gui::AudioUnitGui>) -> Result<()> + Send + 'static,
+    {
+        if !self.is_initialized() {
+            // Invoke callback with error immediately
+            let _ = callback(Err(Error::NotInitialized));
+            return;
+        }
+
+        // Box the callback so we can pass it through C
+        let boxed_callback = Box::new(callback);
+        let user_data = Box::into_raw(boxed_callback) as *mut std::ffi::c_void;
+
+        // Define the C callback trampoline
+        extern "C" fn trampoline<F>(
+            user_data: *mut std::ffi::c_void,
+            gui: *mut ffi::RackAUGui,
+            error_code: std::os::raw::c_int,
+        ) where
+            F: FnOnce(Result<super::gui::AudioUnitGui>) -> Result<()> + Send + 'static,
+        {
+            // Safety: user_data is the boxed callback we created above
+            let callback = unsafe {
+                Box::from_raw(user_data as *mut F)
+            };
+
+            let result = if gui.is_null() {
+                Err(map_error(error_code))
+            } else {
+                // Safety: gui is a valid pointer from C++
+                Ok(unsafe { super::gui::AudioUnitGui::from_raw(gui) })
+            };
+
+            // Invoke the user's callback
+            let _ = callback(result);
+        }
+
+        // Call the FFI function with our trampoline
+        unsafe {
+            ffi::rack_au_gui_create_async(
+                self.inner.as_ptr(),
+                trampoline::<F>,
+                user_data,
+            );
+        }
+    }
 }
 
 impl Drop for AudioUnitPlugin {

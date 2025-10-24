@@ -14,6 +14,12 @@
 #include <emmintrin.h>  // SSE2
 #endif
 
+#include <mutex>
+
+// Global mutex to serialize AudioUnit cleanup operations
+// AudioUnitUninitialize/AudioComponentInstanceDispose are not fully thread-safe
+static std::mutex g_audio_unit_cleanup_mutex;
+
 // Internal plugin state
 struct RackAUPlugin {
     AudioComponentInstance audio_unit;
@@ -225,7 +231,12 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     }
 
     // Create the AudioComponentInstance
-    OSStatus status = AudioComponentInstanceNew(component, &plugin->audio_unit);
+    // Serialize AudioComponent operations to avoid crashes in Apple's framework
+    OSStatus status;
+    {
+        std::lock_guard<std::mutex> lock(g_audio_unit_cleanup_mutex);
+        status = AudioComponentInstanceNew(component, &plugin->audio_unit);
+    }
     if (status != noErr || !plugin->audio_unit) {
         delete plugin;
         return nullptr;
@@ -240,6 +251,9 @@ void rack_au_plugin_free(RackAUPlugin* plugin) {
     }
 
     if (plugin->audio_unit) {
+        // Serialize AudioUnit cleanup to avoid crashes in Apple's framework
+        // when multiple instances are being disposed concurrently
+        std::lock_guard<std::mutex> lock(g_audio_unit_cleanup_mutex);
         AudioUnitUninitialize(plugin->audio_unit);
         AudioComponentInstanceDispose(plugin->audio_unit);
     }
@@ -428,7 +442,11 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     // We don't return error here
 
     // Initialize the AudioUnit
-    status = AudioUnitInitialize(plugin->audio_unit);
+    // Serialize AudioUnit initialization to avoid crashes in Apple's framework
+    {
+        std::lock_guard<std::mutex> lock(g_audio_unit_cleanup_mutex);
+        status = AudioUnitInitialize(plugin->audio_unit);
+    }
     if (status != noErr) {
         // Clean up buffers on failure
         if (plugin->input_buffer_list) {
@@ -1218,4 +1236,17 @@ int rack_au_plugin_send_midi(
     }
 
     return RACK_AU_OK;
+}
+
+// ============================================================================
+// GUI Helper
+// ============================================================================
+
+// Helper function for GUI code to access AudioComponentInstance
+// This allows au_gui.mm to get the audio_unit without accessing the opaque struct
+extern "C" AudioComponentInstance rack_au_plugin_get_audio_unit(RackAUPlugin* plugin) {
+    if (!plugin) {
+        return NULL;
+    }
+    return plugin->audio_unit;
 }
