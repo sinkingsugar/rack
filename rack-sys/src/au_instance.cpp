@@ -538,8 +538,8 @@ int rack_au_plugin_process(
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
-    // Validate channel counts (hardcoded to stereo for now - Phase 3 will make this dynamic)
-    if (num_input_channels != 2 || num_output_channels != 2) {
+    // Validate channel counts match what plugin was configured with
+    if (num_input_channels != plugin->input_channels || num_output_channels != plugin->output_channels) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 

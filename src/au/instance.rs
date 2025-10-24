@@ -376,6 +376,72 @@ impl PluginInstance for AudioUnitPlugin {
 
 // Additional methods not in PluginInstance trait
 impl AudioUnitPlugin {
+    /// Get the number of input channels
+    ///
+    /// Returns the actual number of input channels the plugin was configured with
+    /// after initialization. This may differ from what was requested if the plugin
+    /// doesn't support the requested configuration.
+    ///
+    /// # Returns
+    ///
+    /// - Number of input channels (e.g., 1 for mono, 2 for stereo)
+    /// - 0 if not initialized
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    /// let channels = plugin.input_channels();
+    /// println!("Plugin has {} input channels", channels);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn input_channels(&self) -> usize {
+        self.input_channels
+    }
+
+    /// Get the number of output channels
+    ///
+    /// Returns the actual number of output channels the plugin was configured with
+    /// after initialization. This may differ from what was requested if the plugin
+    /// doesn't support the requested configuration.
+    ///
+    /// # Returns
+    ///
+    /// - Number of output channels (e.g., 1 for mono, 2 for stereo)
+    /// - 0 if not initialized
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example() -> Result<()> {
+    /// # let scanner = Scanner::new()?;
+    /// # let plugins = scanner.scan()?;
+    /// # let mut plugin = scanner.load(&plugins[0])?;
+    /// plugin.initialize(48000.0, 512)?;
+    /// let channels = plugin.output_channels();
+    /// println!("Plugin has {} output channels", channels);
+    ///
+    /// // Allocate buffers with correct channel count
+    /// let mut inputs: Vec<Vec<f32>> = (0..plugin.input_channels())
+    ///     .map(|_| vec![0.0f32; 512])
+    ///     .collect();
+    /// let mut outputs: Vec<Vec<f32>> = (0..plugin.output_channels())
+    ///     .map(|_| vec![0.0f32; 512])
+    ///     .collect();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn output_channels(&self) -> usize {
+        self.output_channels
+    }
+
     /// Get the number of factory presets
     ///
     /// # Returns
@@ -1724,5 +1790,104 @@ mod tests {
                 .expect("Failed to load preset");
             println!("  ✓ Loaded preset {}: {}", i, preset.name);
         }
+    }
+
+    #[test]
+    fn test_channel_count_queries() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+
+        // Before init, should be 0
+        assert_eq!(plugin.input_channels(), 0, "Input channels should be 0 before init");
+        assert_eq!(plugin.output_channels(), 0, "Output channels should be 0 before init");
+
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // After init, should have valid channel counts
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        assert!(input_ch > 0, "Input channels should be > 0 after init");
+        assert!(output_ch > 0, "Output channels should be > 0 after init");
+
+        println!("Plugin configured with {} input, {} output channels", input_ch, output_ch);
+        println!("✓ Channel count queries work correctly");
+    }
+
+    #[test]
+    fn test_process_with_wrong_channel_count() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        // Create buffers with WRONG channel count (1 instead of actual)
+        let left_in = vec![0.0f32; 512];
+        let mut left_out = vec![0.0f32; 512];
+
+        let result = plugin.process(
+            &[&left_in],  // Only 1 channel
+            &mut [&mut left_out],  // Only 1 channel
+            512
+        );
+
+        // Should fail if plugin needs different channel count
+        if input_ch != 1 || output_ch != 1 {
+            assert!(result.is_err(), "process() should fail with wrong channel count");
+            println!("✓ Correctly rejected wrong channel count (1 vs {}/{})", input_ch, output_ch);
+        } else {
+            println!("✓ Plugin is mono, 1 channel succeeded");
+        }
+    }
+
+    #[test]
+    fn test_process_with_correct_channel_count() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        // Create buffers with CORRECT channel count
+        let mut inputs: Vec<Vec<f32>> = (0..input_ch).map(|_| vec![0.0f32; 512]).collect();
+        let mut outputs: Vec<Vec<f32>> = (0..output_ch).map(|_| vec![0.0f32; 512]).collect();
+
+        // Fill input with test signal
+        for ch in &mut inputs {
+            for (i, sample) in ch.iter_mut().enumerate() {
+                let t = i as f32 / 48000.0;
+                *sample = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+            }
+        }
+
+        // Convert to slices for process()
+        let input_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
+        let mut output_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        let result = plugin.process(&input_refs, &mut output_refs, 512);
+
+        assert!(result.is_ok(), "process() should succeed with correct channel count");
+        println!("✓ Successfully processed with {}/{} channels", input_ch, output_ch);
     }
 }
