@@ -126,9 +126,10 @@ fn main() -> Result<()> {
     let plugin = Arc::new(Mutex::new(plugin));
     let plugin_clone = plugin.clone();
 
-    // Create input/output buffers
-    let input = AudioBuffer::new(buffer_frames * 2); // Stereo
-    let input = Arc::new(input);
+    // Create input/output buffers (planar format - separate buffer per channel)
+    let left_in = vec![0.0f32; buffer_frames];
+    let right_in = vec![0.0f32; buffer_frames];
+    let input = Arc::new((left_in, right_in));
     let input_clone = input.clone();
 
     // Build the audio stream
@@ -320,14 +321,16 @@ fn build_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     plugin: Arc<Mutex<Plugin>>,
-    input: Arc<AudioBuffer>,
+    input: Arc<(Vec<f32>, Vec<f32>)>,
     channels: usize,
     buffer_frames: usize,
 ) -> Result<cpal::Stream>
 where
     T: cpal::Sample + cpal::SizedSample + cpal::FromSample<f32>,
 {
-    let mut output_buffer = AudioBuffer::new(buffer_frames * 2); // Stereo
+    // Output buffers (planar format)
+    let mut left_out = vec![0.0f32; buffer_frames];
+    let mut right_out = vec![0.0f32; buffer_frames];
 
     let stream = device
         .build_output_stream(
@@ -335,17 +338,21 @@ where
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let mut plugin = plugin.lock().unwrap();
 
-                // Process audio through the plugin
-                if let Err(e) = plugin.process(&input, &mut output_buffer) {
+                // Process audio through the plugin (planar format)
+                if let Err(e) = plugin.process(
+                    &[&input.0, &input.1],
+                    &mut [&mut left_out, &mut right_out],
+                    buffer_frames
+                ) {
                     eprintln!("Error processing audio: {}", e);
                     return;
                 }
 
-                // Copy plugin output to CPAL buffer
+                // Copy plugin output (planar) to CPAL buffer (interleaved)
                 let frames = data.len() / channels;
                 for i in 0..frames.min(buffer_frames) {
-                    let left = output_buffer[i * 2];
-                    let right = output_buffer[i * 2 + 1];
+                    let left = left_out[i];
+                    let right = right_out[i];
 
                     // Write to output based on channel count
                     if channels == 2 {

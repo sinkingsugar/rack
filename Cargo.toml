@@ -1,6 +1,6 @@
 [package]
 name = "rack"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Giovanni <giovanni@fragcolor.com>"]
 license = "MIT OR Apache-2.0"
@@ -11,7 +11,6 @@ keywords = ["audio", "plugin", "vst", "audiounit", "host"]
 categories = ["multimedia::audio"]
 
 [dependencies]
-aligned-vec = "0.6.4"
 smallvec = "1.13"
 thiserror = "2.0"
 cpal = { version = "0.15", optional = true }

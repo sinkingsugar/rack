@@ -1,4 +1,4 @@
-use crate::{AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, PresetInfo, Result};
+use crate::{Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance, PresetInfo, Result};
 use smallvec::SmallVec;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -73,20 +73,56 @@ impl PluginInstance for AudioUnitPlugin {
         }
     }
 
-    fn process(&mut self, input: &AudioBuffer, output: &mut AudioBuffer) -> Result<()> {
+    fn process(
+        &mut self,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        num_frames: usize,
+    ) -> Result<()> {
         if !self.is_initialized() {
             return Err(Error::NotInitialized);
         }
 
-        // Calculate frames (input/output are interleaved stereo)
-        let frames = (input.len() / 2).min(output.len() / 2);
+        // Validate inputs
+        if inputs.is_empty() || outputs.is_empty() {
+            return Err(Error::Other("Empty input or output channels".to_string()));
+        }
+
+        // Validate all channels have the same length
+        for (i, input) in inputs.iter().enumerate() {
+            if input.len() < num_frames {
+                return Err(Error::Other(format!(
+                    "Input channel {} has {} samples, need at least {}",
+                    i,
+                    input.len(),
+                    num_frames
+                )));
+            }
+        }
+
+        for (i, output) in outputs.iter().enumerate() {
+            if output.len() < num_frames {
+                return Err(Error::Other(format!(
+                    "Output channel {} has {} samples, need at least {}",
+                    i,
+                    output.len(),
+                    num_frames
+                )));
+            }
+        }
+
+        // Create pointer arrays for FFI
+        let input_ptrs: Vec<*const f32> = inputs.iter().map(|ch| ch.as_ptr()).collect();
+        let mut output_ptrs: Vec<*mut f32> = outputs.iter_mut().map(|ch| ch.as_mut_ptr()).collect();
 
         unsafe {
             let result = ffi::rack_au_plugin_process(
                 self.inner.as_ptr(),
-                input.as_ptr(),
-                output.as_mut_ptr(),
-                frames as u32,
+                input_ptrs.as_ptr(),
+                inputs.len() as u32,
+                output_ptrs.as_mut_ptr(),
+                outputs.len() as u32,
+                num_frames as u32,
             );
 
             if result != ffi::RACK_AU_OK {
@@ -817,27 +853,33 @@ mod tests {
             .initialize(48000.0, 512)
             .expect("Failed to initialize plugin");
 
-        // Create test buffers (512 frames of stereo audio = 1024 samples)
+        // Create test buffers (planar format - separate buffer per channel)
         let frames = 512;
-        let mut input = AudioBuffer::new(frames * 2);
-        let mut output = AudioBuffer::new(frames * 2);
+        let mut left_in = vec![0.0f32; frames];
+        let mut right_in = vec![0.0f32; frames];
+        let mut left_out = vec![0.0f32; frames];
+        let mut right_out = vec![0.0f32; frames];
 
         // Fill input with a simple sine wave (440 Hz)
         let frequency = 440.0f32;
         let sample_rate = 48000.0f32;
         for i in 0..frames {
             let sample = (2.0 * std::f32::consts::PI * frequency * i as f32 / sample_rate).sin() * 0.5;
-            input[i * 2] = sample; // Left channel
-            input[i * 2 + 1] = sample; // Right channel
+            left_in[i] = sample;  // Left channel
+            right_in[i] = sample; // Right channel
         }
 
-        // Process audio
+        // Process audio (planar format)
         plugin
-            .process(&input, &mut output)
+            .process(
+                &[&left_in, &right_in],
+                &mut [&mut left_out, &mut right_out],
+                frames
+            )
             .expect("Audio processing failed");
 
         // Verify output is not all zeros (plugin did something)
-        let has_signal = output.iter().any(|&sample| sample != 0.0);
+        let has_signal = left_out.iter().chain(right_out.iter()).any(|&sample| sample != 0.0);
         assert!(
             has_signal,
             "Output should contain audio signal (not all zeros)"
@@ -1170,11 +1212,17 @@ mod tests {
 
         println!("✓ MIDI note on events sent successfully");
 
-        // Process audio to render the notes
-        let input = AudioBuffer::new(512 * 2);
-        let mut output = AudioBuffer::new(512 * 2);
+        // Process audio to render the notes (planar format)
+        let left_in = vec![0.0f32; 512];
+        let right_in = vec![0.0f32; 512];
+        let mut left_out = vec![0.0f32; 512];
+        let mut right_out = vec![0.0f32; 512];
 
-        let result = plugin.process(&input, &mut output);
+        let result = plugin.process(
+            &[&left_in, &right_in],
+            &mut [&mut left_out, &mut right_out],
+            512
+        );
         assert!(result.is_ok(), "Failed to process audio after MIDI");
 
         println!("✓ Audio processed after MIDI events");
@@ -1296,15 +1344,22 @@ mod tests {
         let result = plugin.send_midi(&events);
         assert!(result.is_ok(), "Failed to send multi-channel MIDI: {:?}", result.err());
 
-        // Process audio to verify notes rendered
-        let input = AudioBuffer::new(512 * 2);
-        let mut output = AudioBuffer::new(512 * 2);
+        // Process audio to verify notes rendered (planar format)
+        let left_in = vec![0.0f32; 512];
+        let right_in = vec![0.0f32; 512];
+        let mut left_out = vec![0.0f32; 512];
+        let mut right_out = vec![0.0f32; 512];
+
         plugin
-            .process(&input, &mut output)
+            .process(
+                &[&left_in, &right_in],
+                &mut [&mut left_out, &mut right_out],
+                512
+            )
             .expect("Failed to process audio");
 
         // Check that we got some audio output
-        let has_output = output.iter().any(|&sample| sample.abs() > 1e-6);
+        let has_output = left_out.iter().chain(right_out.iter()).any(|&sample| sample.abs() > 1e-6);
         assert!(has_output, "Expected audio output from multi-channel MIDI notes");
 
         println!("✓ Multi-channel MIDI events sent successfully");

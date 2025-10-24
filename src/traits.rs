@@ -1,4 +1,4 @@
-use crate::{AudioBuffer, MidiEvent, ParameterInfo, PluginInfo, Result};
+use crate::{MidiEvent, ParameterInfo, PluginInfo, Result};
 
 /// Trait for scanning and discovering audio plugins
 pub trait PluginScanner {
@@ -22,12 +22,47 @@ pub trait PluginInstance: Send {
 
     /// Process audio through the plugin
     ///
-    /// Buffers must be 16-byte aligned for optimal SIMD performance.
-    /// Use `AudioBuffer` to ensure alignment.
+    /// Uses planar (non-interleaved) audio format - each channel is a separate buffer.
+    /// This matches the internal format of VST3, AudioUnit, CLAP, and AAX plugins,
+    /// enabling zero-copy processing in effect chains.
     ///
-    /// For effects: input contains the audio to process, output receives the processed audio
-    /// For instruments: input may be empty, output receives the generated audio
-    fn process(&mut self, input: &AudioBuffer, output: &mut AudioBuffer) -> Result<()>;
+    /// # Arguments
+    ///
+    /// * `inputs` - Array of input channel buffers (e.g., `&[left, right]` for stereo)
+    /// * `outputs` - Array of output channel buffers (e.g., `&mut [left, right]` for stereo)
+    /// * `num_frames` - Number of audio frames to process (must be ≤ max_block_size)
+    ///
+    /// # Channel Formats
+    ///
+    /// * Mono: `inputs = &[&mono]`, `outputs = &mut [&mut mono]`
+    /// * Stereo: `inputs = &[&left, &right]`, `outputs = &mut [&mut left, &mut right]`
+    /// * 5.1 Surround: 6 channels (L, R, C, LFE, SL, SR)
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example(mut plugin: impl PluginInstance) -> Result<()> {
+    /// // Stereo processing
+    /// let left_in = vec![0.0f32; 512];
+    /// let right_in = vec![0.0f32; 512];
+    /// let mut left_out = vec![0.0f32; 512];
+    /// let mut right_out = vec![0.0f32; 512];
+    ///
+    /// plugin.process(
+    ///     &[&left_in, &right_in],
+    ///     &mut [&mut left_out, &mut right_out],
+    ///     512
+    /// )?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn process(
+        &mut self,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        num_frames: usize,
+    ) -> Result<()>;
 
     /// Get the number of parameters
     fn parameter_count(&self) -> usize;

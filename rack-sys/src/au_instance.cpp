@@ -5,15 +5,6 @@
 #include <cstdio>  // for sscanf
 #include <climits> // for INT_MAX
 #include <new>     // for std::align_val_t
-
-#ifdef __ARM_NEON
-#include <arm_neon.h>
-#endif
-
-#if defined(__x86_64__) || defined(_M_X64)
-#include <emmintrin.h>  // SSE2
-#endif
-
 #include <mutex>
 
 // Global mutex to serialize AudioUnit cleanup operations
@@ -28,16 +19,9 @@ struct RackAUPlugin {
     uint32_t max_block_size;
     char unique_id[64];
 
-    // Audio buffers for processing
+    // Audio buffers for processing (planar format - one buffer per channel)
     AudioBufferList* input_buffer_list;
     AudioBufferList* output_buffer_list;
-    // Pointer to current input for render callback
-    // Thread safety: AudioUnitRender is synchronous - the callback executes
-    // on the calling thread before AudioUnitRender returns.
-    // IMPORTANT: This means process() is NOT safe for concurrent calls from
-    // multiple threads (race condition on current_input). Plugin instances
-    // are Send but NOT Sync - must not be shared across threads during processing.
-    const float* current_input;
 
     // Sample position tracking for AudioTimeStamp
     int64_t sample_position;
@@ -87,6 +71,7 @@ static const char* parameter_unit_to_string(AudioUnitParameterUnit unit) {
 }
 
 // Render callback: provides input audio to the AudioUnit
+// Now works with planar data (no interleave/deinterleave conversion needed)
 static OSStatus input_render_callback(
     void* inRefCon,
     AudioUnitRenderActionFlags* ioActionFlags,
@@ -97,7 +82,7 @@ static OSStatus input_render_callback(
 ) {
     RackAUPlugin* plugin = static_cast<RackAUPlugin*>(inRefCon);
 
-    if (!plugin || !plugin->current_input || !ioData) {
+    if (!plugin || !plugin->input_buffer_list || !ioData) {
         *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
         return noErr;
     }
@@ -108,66 +93,21 @@ static OSStatus input_render_callback(
         return kAudioUnitErr_TooManyFramesToProcess;
     }
 
-    // Copy interleaved input to non-interleaved AudioBufferList
-    // NOTE: Currently hardcoded to stereo (2 channels) - mono/surround not yet supported
+    // Copy planar input from our buffers to AudioUnit's buffers (planar → planar, no conversion!)
+    UInt32 num_channels = ioData->mNumberBuffers < plugin->input_buffer_list->mNumberBuffers
+                              ? ioData->mNumberBuffers
+                              : plugin->input_buffer_list->mNumberBuffers;
+
     const UInt32 required_bytes = inNumberFrames * sizeof(float);
-    if (ioData->mNumberBuffers >= 2 &&
-        ioData->mBuffers[0].mData &&
-        ioData->mBuffers[1].mData &&
-        ioData->mBuffers[0].mDataByteSize >= required_bytes &&
-        ioData->mBuffers[1].mDataByteSize >= required_bytes) {
+    for (UInt32 ch = 0; ch < num_channels; ch++) {
+        if (ioData->mBuffers[ch].mData &&
+            ioData->mBuffers[ch].mDataByteSize >= required_bytes &&
+            plugin->input_buffer_list->mBuffers[ch].mData) {
 
-        float* left_out = static_cast<float*>(ioData->mBuffers[0].mData);
-        float* right_out = static_cast<float*>(ioData->mBuffers[1].mData);
-        const float* interleaved = plugin->current_input;
-
-#ifdef __ARM_NEON
-        // ARM NEON: SIMD-optimized deinterleaving, process 4 frames at a time
-        UInt32 i = 0;
-        UInt32 simd_frames = (inNumberFrames / 4) * 4;
-        for (; i < simd_frames; i += 4) {
-            float32x4x2_t stereo = vld2q_f32(&interleaved[i * 2]);
-            vst1q_f32(&left_out[i], stereo.val[0]);
-            vst1q_f32(&right_out[i], stereo.val[1]);
+            const float* src = static_cast<const float*>(plugin->input_buffer_list->mBuffers[ch].mData);
+            float* dest = static_cast<float*>(ioData->mBuffers[ch].mData);
+            memcpy(dest, src, required_bytes);
         }
-        // Handle remaining frames (scalar fallback)
-        for (; i < inNumberFrames; i++) {
-            left_out[i] = interleaved[i * 2];
-            right_out[i] = interleaved[i * 2 + 1];
-        }
-#elif defined(__x86_64__) || defined(_M_X64)
-        // x86_64 SSE2: SIMD-optimized deinterleaving, process 4 frames at a time
-        UInt32 i = 0;
-        UInt32 simd_frames = (inNumberFrames / 4) * 4;
-        for (; i < simd_frames; i += 4) {
-            // Loads from Rust's aligned AudioBuffer (use unaligned for extra safety)
-            __m128 pair0 = _mm_loadu_ps(&interleaved[i * 2]);      // L0 R0 L1 R1
-            __m128 pair1 = _mm_loadu_ps(&interleaved[i * 2 + 4]);  // L2 R2 L3 R3
-
-            // Shuffle to extract left: L0 L1 L2 L3
-            __m128 left = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(2, 0, 2, 0));
-            // Shuffle to extract right: R0 R1 R2 R3
-            __m128 right = _mm_shuffle_ps(pair0, pair1, _MM_SHUFFLE(3, 1, 3, 1));
-
-            // Unaligned stores to AudioUnit-provided buffers (alignment not guaranteed)
-            _mm_storeu_ps(&left_out[i], left);
-            _mm_storeu_ps(&right_out[i], right);
-        }
-        // Handle remaining frames (scalar fallback)
-        for (; i < inNumberFrames; i++) {
-            left_out[i] = interleaved[i * 2];
-            right_out[i] = interleaved[i * 2 + 1];
-        }
-#else
-        // Scalar fallback for other platforms
-        for (UInt32 i = 0; i < inNumberFrames; i++) {
-            left_out[i] = interleaved[i * 2];
-            right_out[i] = interleaved[i * 2 + 1];
-        }
-#endif
-    } else {
-        // Buffer validation failed - return silence
-        *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
     }
 
     return noErr;
@@ -208,7 +148,6 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     plugin->max_block_size = 0;
     plugin->input_buffer_list = nullptr;
     plugin->output_buffer_list = nullptr;
-    plugin->current_input = nullptr;
     plugin->sample_position = 0;
     plugin->parameter_ids = nullptr;
     plugin->parameter_info = nullptr;
@@ -543,12 +482,19 @@ int rack_au_plugin_is_initialized(RackAUPlugin* plugin) {
     return plugin && plugin->initialized ? 1 : 0;
 }
 
-int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* output, uint32_t frames) {
+int rack_au_plugin_process(
+    RackAUPlugin* plugin,
+    const float* const* inputs,
+    uint32_t num_input_channels,
+    float* const* outputs,
+    uint32_t num_output_channels,
+    uint32_t frames
+) {
     if (!plugin || !plugin->initialized) {
         return RACK_AU_ERROR_NOT_INITIALIZED;
     }
 
-    if (!input || !output || frames == 0) {
+    if (!inputs || !outputs || frames == 0) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
@@ -556,8 +502,19 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
-    // Set current input for render callback
-    plugin->current_input = input;
+    // Validate channel counts (hardcoded to stereo for now - Phase 3 will make this dynamic)
+    if (num_input_channels != 2 || num_output_channels != 2) {
+        return RACK_AU_ERROR_INVALID_PARAM;
+    }
+
+    // Copy input channels to AudioUnit buffers (planar → planar, no conversion!)
+    for (uint32_t ch = 0; ch < num_input_channels; ch++) {
+        if (ch < plugin->input_buffer_list->mNumberBuffers) {
+            float* dest = static_cast<float*>(plugin->input_buffer_list->mBuffers[ch].mData);
+            const float* src = inputs[ch];
+            memcpy(dest, src, frames * sizeof(float));
+        }
+    }
 
     // Set up AudioTimeStamp with running sample position
     AudioTimeStamp timestamp;
@@ -576,78 +533,20 @@ int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* outp
         plugin->output_buffer_list
     );
 
-    plugin->current_input = nullptr;
-
     if (status != noErr) {
         return RACK_AU_ERROR_AUDIO_UNIT + status;
     }
 
-    // Convert non-interleaved output to interleaved stereo
-    // Verify buffers are valid before dereferencing
-    if (plugin->output_buffer_list->mNumberBuffers >= 2 &&
-        plugin->output_buffer_list->mBuffers[0].mData &&
-        plugin->output_buffer_list->mBuffers[1].mData &&
-        plugin->output_buffer_list->mBuffers[0].mDataByteSize >= frames * sizeof(float) &&
-        plugin->output_buffer_list->mBuffers[1].mDataByteSize >= frames * sizeof(float)) {
-
-        const float* left_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[0].mData);
-        const float* right_in = static_cast<const float*>(plugin->output_buffer_list->mBuffers[1].mData);
-
-#ifdef __ARM_NEON
-        // ARM NEON: SIMD-optimized interleaving, process 4 frames at a time
-        uint32_t i = 0;
-        uint32_t simd_frames = (frames / 4) * 4;
-        for (; i < simd_frames; i += 4) {
-            float32x4x2_t stereo;
-            stereo.val[0] = vld1q_f32(&left_in[i]);
-            stereo.val[1] = vld1q_f32(&right_in[i]);
-            vst2q_f32(&output[i * 2], stereo);
+    // Copy output channels from AudioUnit buffers (planar → planar, no conversion!)
+    for (uint32_t ch = 0; ch < num_output_channels; ch++) {
+        if (ch < plugin->output_buffer_list->mNumberBuffers) {
+            const float* src = static_cast<const float*>(plugin->output_buffer_list->mBuffers[ch].mData);
+            float* dest = outputs[ch];
+            memcpy(dest, src, frames * sizeof(float));
         }
-        // Handle remaining frames (scalar fallback)
-        for (; i < frames; i++) {
-            output[i * 2] = left_in[i];
-            output[i * 2 + 1] = right_in[i];
-        }
-#elif defined(__x86_64__) || defined(_M_X64)
-        // x86_64 SSE2: SIMD-optimized interleaving, process 4 frames at a time
-        uint32_t i = 0;
-        uint32_t simd_frames = (frames / 4) * 4;
-        for (; i < simd_frames; i += 4) {
-            // Unaligned loads from AudioUnit buffers (defensive - we allocate them aligned, but be safe)
-            __m128 left = _mm_loadu_ps(&left_in[i]);   // L0 L1 L2 L3
-            __m128 right = _mm_loadu_ps(&right_in[i]); // R0 R1 R2 R3
-
-            // Interleave low half: L0 R0 L1 R1
-            __m128 low = _mm_unpacklo_ps(left, right);
-            // Interleave high half: L2 R2 L3 R3
-            __m128 high = _mm_unpackhi_ps(left, right);
-
-            // Stores to Rust's 16-byte aligned AudioBuffer
-            // Note: Mathematically guaranteed to be 16-byte aligned due to i being multiple of 4,
-            // but using unaligned stores for extra safety with negligible performance cost
-            _mm_storeu_ps(&output[i * 2], low);
-            _mm_storeu_ps(&output[i * 2 + 4], high);
-        }
-        // Handle remaining frames (scalar fallback)
-        for (; i < frames; i++) {
-            output[i * 2] = left_in[i];
-            output[i * 2 + 1] = right_in[i];
-        }
-#else
-        // Scalar fallback for other platforms
-        for (uint32_t i = 0; i < frames; i++) {
-            output[i * 2] = left_in[i];
-            output[i * 2 + 1] = right_in[i];
-        }
-#endif
-    } else {
-        // Buffer validation failed - return silence
-        memset(output, 0, frames * 2 * sizeof(float));
     }
 
     // Update sample position for next call
-    // Note: int64_t will overflow after ~6 million years at 48kHz
-    // This is not a practical concern, but some AudioUnits may expect wrapping behavior
     plugin->sample_position += frames;
 
     return RACK_AU_OK;
