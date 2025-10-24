@@ -387,18 +387,12 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         status = AudioUnitInitialize(plugin->audio_unit);
     }
     if (status != noErr) {
-        // Clean up buffers on failure
+        // Clean up buffer lists on failure (zero-copy: no mData to free)
         if (plugin->input_buffer_list) {
-            for (UInt32 i = 0; i < input_channels; i++) {
-                ::operator delete(plugin->input_buffer_list->mBuffers[i].mData, std::align_val_t{16});
-            }
             free(plugin->input_buffer_list);
             plugin->input_buffer_list = nullptr;
         }
         if (plugin->output_buffer_list) {
-            for (UInt32 i = 0; i < output_channels; i++) {
-                ::operator delete(plugin->output_buffer_list->mBuffers[i].mData, std::align_val_t{16});
-            }
             free(plugin->output_buffer_list);
             plugin->output_buffer_list = nullptr;
         }

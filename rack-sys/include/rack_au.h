@@ -115,7 +115,7 @@ int rack_au_plugin_process(
     RackAUPlugin* plugin,
     const float* const* inputs,
     uint32_t num_input_channels,
-    float* const* const outputs,
+    float* const* outputs,
     uint32_t num_output_channels,
     uint32_t frames
 );
