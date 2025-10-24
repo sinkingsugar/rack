@@ -246,6 +246,11 @@ typedef void (*RackAUGuiCallback)(void* user_data, RackAUGui* gui, int error_cod
 // Tries AUv3 (modern) → AUv2 (legacy) → generic parameter UI in order
 // Callback is invoked on main thread when GUI is ready or creation fails
 //
+// Generic UI fallback:
+//   - Displays up to 20 parameters with sliders
+//   - Read-only (sliders show values but don't update plugin)
+//   - Most plugins provide AUv3/AUv2 custom UIs with bidirectional sync
+//
 // IMPORTANT: This function must be called from the main thread
 // The callback will also be invoked on the main thread
 //
@@ -262,6 +267,8 @@ void rack_au_gui_create_async(
 
 // Destroy GUI and clean up resources
 // gui: GUI handle returned by rack_au_gui_create_async
+// IMPORTANT: gui pointer becomes invalid immediately after this call
+// Cleanup happens asynchronously on main thread
 // Thread-safety: Should be called from main thread
 void rack_au_gui_destroy(RackAUGui* gui);
 

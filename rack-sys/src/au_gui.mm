@@ -124,6 +124,7 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
         }
 
         // Create UI for each parameter (limit to first 20 for reasonable UI size)
+        // TODO (Phase 9): Add scrolling support or make limit configurable
         UInt32 display_count = param_count > 20 ? 20 : param_count;
         for (UInt32 i = 0; i < display_count; i++) {
             AudioUnitParameterID param_id = param_ids[i];
@@ -159,8 +160,11 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit) {
             AudioUnitGetParameter(audio_unit, param_id, kAudioUnitScope_Global, 0, &currentValue);
             [slider setDoubleValue:currentValue];
 
-            // Set slider action to update parameter
-            [slider setTarget:nil];  // We'll set this up later if needed
+            // NOTE: Generic UI is read-only (sliders don't update plugin parameters)
+            // Most plugins use AUv3/AUv2 custom UIs with bidirectional parameter sync
+            // Generic UI is a fallback for plugins with no custom view
+            // TODO (Phase 9): Implement slider callbacks with AudioUnitSetParameter
+            [slider setTarget:nil];
             [slider setAction:nil];
 
             // Value label (fixed width)
@@ -256,6 +260,8 @@ static NSView* try_load_auv2_gui(AudioComponentInstance audio_unit) {
         }
 
         // Convert CFURLRef to NSURL
+        // AudioUnitGetProperty returns owned CF objects (Create Rule)
+        // __bridge doesn't transfer ownership to ARC, so manual CFRelease required
         NSURL* bundleURL = (__bridge NSURL*)viewInfo.mCocoaAUViewBundleLocation;
         NSBundle* viewBundle = [NSBundle bundleWithURL:bundleURL];
 
@@ -388,6 +394,9 @@ void rack_au_gui_create_async(
 }
 
 // Destroy GUI and clean up resources
+// IMPORTANT: gui pointer becomes invalid immediately after this call
+// Cleanup happens asynchronously on main thread to avoid deadlocks
+// Rust Drop impl ensures this is safe (ownership transferred)
 void rack_au_gui_destroy(RackAUGui* gui) {
     if (!gui) {
         return;
