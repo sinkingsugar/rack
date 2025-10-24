@@ -44,7 +44,7 @@ This hybrid approach allows us to:
 - Iterate fast, validate early
 - Add complexity only when needed
 
-## Current Status: Phase 6 Complete
+## Current Status: Phase 8 Complete - AudioUnit Support COMPLETE
 
 **Completed Phases:**
 1. ✅ Phase 1: AudioUnit Scanner (C++)
@@ -53,8 +53,12 @@ This hybrid approach allows us to:
 4. ✅ Phase 4: Audio Processing (SIMD optimized)
 5. ✅ Phase 5: Parameter Control
 6. ✅ Phase 6: MIDI Support (complete MIDI 1.0, zero-allocation)
+7. ✅ Phase 7: Preset Management (factory presets + state serialization)
+8. ✅ Phase 8: GUI Support (AUv3/AUv2/generic fallback)
 
-**Next Phase:** Phase 7 (Preset Management) or Phase 8 (GUI Support - recommended)
+**Status:** Rack provides complete AudioUnit hosting capabilities on macOS. All core features implemented and production-ready.
+
+**Next Phase:** Phase 9 (Advanced Features) or Phase 10 (Additional Plugin Formats - VST3/CLAP)
 
 See TODO.md for detailed phase breakdown and implementation status.
 
@@ -122,9 +126,12 @@ cmake --build . --target test
 
 ## Notes for Future Claude Sessions
 
-- This project has completed Phases 1-6 and is production-ready for AudioUnit MIDI support
+- **AudioUnit support is COMPLETE** (Phases 1-8): scanning, loading, processing, parameters, MIDI, presets, GUI
+- Phase 8 (GUI) implements AUv3 → AUv2 → Generic UI fallback with async design
+- **Critical thread-safety fix**: Global mutex (`g_audio_unit_cleanup_mutex`) in `au_instance.cpp` serializes AudioUnit lifecycle operations (AudioComponentInstanceNew, AudioUnitInitialize, AudioUnitUninitialize, AudioComponentInstanceDispose) to prevent Apple AudioUnit framework race conditions
+- Init/deinit are cold paths (already allocate/do I/O), mutex overhead is negligible
+- AudioUnitRender stays lock-free (hot path unaffected)
 - Phase 6 (MIDI) uses SmallVec for zero-allocation performance
-- Focus continues on AudioUnit on macOS - GUI support is next priority
 - KISS principle guides all design decisions
 - **Performance over documentation**: Fix performance issues, don't just document them
 - Giovanni (user) knows C++ well, leverage that expertise

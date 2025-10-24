@@ -10,6 +10,7 @@ add_library(rack_sys STATIC
     src/rack_au.cpp
     src/au_scanner.cpp
     src/au_instance.cpp
+    src/au_gui.mm
 )
 
 # Public headers
@@ -24,10 +25,12 @@ if(APPLE)
         "-framework AudioToolbox"
         "-framework CoreAudio"
         "-framework CoreFoundation"
+        "-framework CoreAudioKit"
+        "-framework AppKit"
     )
-    
-    # Enable ARC (Automatic Reference Counting) for Objective-C++ if needed
-    # target_compile_options(rack_sys PRIVATE -fobjc-arc)
+
+    # Enable ARC (Automatic Reference Counting) for Objective-C++ (required for au_gui.mm)
+    target_compile_options(rack_sys PRIVATE -fobjc-arc)
 endif()
 
 # Compiler warnings
@@ -51,6 +54,38 @@ install(DIRECTORY include/
     DESTINATION include
 )
 
+# Optional: Enable AddressSanitizer for debugging
+option(ENABLE_ASAN "Enable AddressSanitizer for memory error detection" OFF)
+if(ENABLE_ASAN)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:CXX,C>:-fsanitize=address>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-fno-optimize-sibling-calls>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-fsanitize-address-use-after-scope>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-fno-omit-frame-pointer>
+        $<$<COMPILE_LANGUAGE:CXX,C>:-g>
+    )
+
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        add_link_options(
+            -fsanitize=address
+            -fno-optimize-sibling-calls
+            -fsanitize-address-use-after-scope
+            -fno-omit-frame-pointer
+            -g
+        )
+    else()
+        add_link_options(
+            $<$<COMPILE_LANGUAGE:CXX,C>:-fsanitize=address>
+            $<$<COMPILE_LANGUAGE:CXX,C>:-fno-optimize-sibling-calls>
+            $<$<COMPILE_LANGUAGE:CXX,C>:-fsanitize-address-use-after-scope>
+            $<$<COMPILE_LANGUAGE:CXX,C>:-fno-omit-frame-pointer>
+            $<$<COMPILE_LANGUAGE:CXX,C>:-g>
+        )
+    endif()
+
+    message(STATUS "AddressSanitizer enabled")
+endif()
+
 # Optional: Build test executables
 option(BUILD_TESTS "Build test executables" OFF)
 if(BUILD_TESTS)
@@ -65,4 +100,10 @@ if(BUILD_TESTS)
         test/test_instance.cpp
     )
     target_link_libraries(rack_sys_test_instance PRIVATE rack_sys)
+
+    # GUI test
+    add_executable(rack_sys_test_gui
+        test/test_gui.cpp
+    )
+    target_link_libraries(rack_sys_test_gui PRIVATE rack_sys)
 endif()
