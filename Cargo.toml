@@ -1,11 +1,12 @@
 [package]
 name = "rack"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Giovanni <giovanni@fragcolor.com>"]
 license = "MIT OR Apache-2.0"
 description = "A modern Rust library for hosting audio plugins"
 repository = "https://github.com/sinkingsugar/rack"
+readme = "README.md"
 keywords = ["audio", "plugin", "vst", "audiounit", "host"]
 categories = ["multimedia::audio"]
 

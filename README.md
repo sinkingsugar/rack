@@ -29,7 +29,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rack = "0.1"
+rack = "0.2"
 ```
 
 ### List available plugins
@@ -38,13 +38,13 @@ rack = "0.1"
 use rack::prelude::*;
 
 fn main() -> Result<()> {
-    let scanner = Scanner::new();
+    let scanner = Scanner::new()?;
     let plugins = scanner.scan()?;
-    
+
     for plugin in plugins {
         println!("{}", plugin);
     }
-    
+
     Ok(())
 }
 ```
@@ -55,33 +55,25 @@ fn main() -> Result<()> {
 use rack::prelude::*;
 
 fn main() -> Result<()> {
-    let scanner = Scanner::new();
+    let scanner = Scanner::new()?;
     let plugins = scanner.scan()?;
-    
+
     // Load first plugin
     let mut plugin = scanner.load(&plugins[0])?;
     plugin.initialize(48000.0, 512)?;
-    
-    // Process audio
-    let input = vec![0.0; 512];
-    let mut output = vec![0.0; 512];
+
+    // Process audio with aligned buffers
+    let input = AudioBuffer::new(1024);  // 512 frames stereo
+    let mut output = AudioBuffer::new(1024);
     plugin.process(&input, &mut output)?;
-    
+
     Ok(())
 }
 ```
 
-### With cpal for audio I/O
+### MIDI Synthesis
 
-Enable the `cpal` feature:
-
-```toml
-[dependencies]
-rack = { version = "0.1", features = ["cpal"] }
-cpal = "0.15"
-```
-
-See [examples/simple_host.rs](examples/simple_host.rs) for a complete example.
+See [examples/simple_synth.rs](examples/simple_synth.rs) for a complete MIDI synthesis example.
 
 ## Platform Support
 
@@ -114,9 +106,6 @@ cargo run --example preset_browser
 
 # Plugin GUI (shows native plugin UI)
 cargo run --example plugin_gui
-
-# Simple host with audio playback (requires cpal feature)
-cargo run --example simple_host --features cpal
 ```
 
 ### Display Plugin GUI
