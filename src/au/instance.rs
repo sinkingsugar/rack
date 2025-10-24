@@ -1943,4 +1943,52 @@ mod tests {
         println!("✓ Correctly rejected too many channels ({}/{} provided vs {}/{} expected)",
                  input_ch + extra_channels, output_ch + extra_channels, input_ch, output_ch);
     }
+
+    #[test]
+    fn test_process_with_mismatched_buffer_lengths() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        if input_ch < 2 {
+            println!("✓ Plugin has < 2 input channels, skipping mismatched length test");
+            return;
+        }
+
+        // Create buffers where channels have DIFFERENT lengths
+        let mut inputs: Vec<Vec<f32>> = Vec::new();
+        inputs.push(vec![0.0f32; 512]);      // First channel: 512 samples
+        inputs.push(vec![0.0f32; 256]);      // Second channel: only 256 samples (WRONG!)
+        for _ in 2..input_ch {
+            inputs.push(vec![0.0f32; 512]);  // Rest: 512 samples
+        }
+
+        let mut outputs: Vec<Vec<f32>> = (0..output_ch).map(|_| vec![0.0f32; 512]).collect();
+
+        let input_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
+        let mut output_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        // Try to process 512 frames, but second input channel only has 256
+        let result = plugin.process(&input_refs, &mut output_refs, 512);
+
+        // Should fail because channel 1 has only 256 samples but we're asking for 512
+        assert!(result.is_err(), "process() should fail when channel buffers have insufficient length");
+
+        if let Err(e) = result {
+            let err_msg = format!("{:?}", e);
+            assert!(err_msg.contains("channel") && err_msg.contains("samples"),
+                    "Error should mention channel and samples, got: {}", err_msg);
+        }
+
+        println!("✓ Correctly rejected mismatched buffer lengths (channel 1: 256 < 512 frames)");
+    }
 }

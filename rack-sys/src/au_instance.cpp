@@ -108,6 +108,10 @@ static OSStatus input_render_callback(
             ioData->mBuffers[ch].mDataByteSize >= required_bytes &&
             plugin->input_buffer_list->mBuffers[ch].mData) {
 
+            // Safety: This memcpy is safe because:
+            // 1. inNumberFrames validated at lines 95-98 to not exceed max_block_size
+            // 2. mData points to caller's buffer (validated in Rust to have ≥max_block_size frames)
+            // 3. Channel count validated in Rust process() before reaching here
             const float* src = static_cast<const float*>(plugin->input_buffer_list->mBuffers[ch].mData);
             float* dest = static_cast<float*>(ioData->mBuffers[ch].mData);
             memcpy(dest, src, required_bytes);
@@ -345,10 +349,7 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     size_t output_buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * output_channels);
     plugin->output_buffer_list = static_cast<AudioBufferList*>(malloc(output_buffer_list_size));
     if (!plugin->output_buffer_list) {
-        // Clean up input buffers
-        for (UInt32 i = 0; i < input_channels; i++) {
-            ::operator delete(plugin->input_buffer_list->mBuffers[i].mData, std::align_val_t{16});
-        }
+        // Clean up input buffer list (zero-copy: no mData to free)
         free(plugin->input_buffer_list);
         plugin->input_buffer_list = nullptr;
         return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
