@@ -203,22 +203,12 @@ void rack_au_plugin_free(RackAUPlugin* plugin) {
         AudioComponentInstanceDispose(plugin->audio_unit);
     }
 
-    // Free audio buffers - free ALL channels, not just buffer[0]
+    // Free AudioBufferList structures (zero-copy: we don't own the buffer memory)
     if (plugin->input_buffer_list) {
-        for (UInt32 i = 0; i < plugin->input_buffer_list->mNumberBuffers; i++) {
-            if (plugin->input_buffer_list->mBuffers[i].mData) {
-                ::operator delete(plugin->input_buffer_list->mBuffers[i].mData, std::align_val_t{16});
-            }
-        }
         free(plugin->input_buffer_list);
     }
 
     if (plugin->output_buffer_list) {
-        for (UInt32 i = 0; i < plugin->output_buffer_list->mNumberBuffers; i++) {
-            if (plugin->output_buffer_list->mBuffers[i].mData) {
-                ::operator delete(plugin->output_buffer_list->mBuffers[i].mData, std::align_val_t{16});
-            }
-        }
         free(plugin->output_buffer_list);
     }
 
@@ -344,21 +334,11 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     }
     plugin->input_buffer_list->mNumberBuffers = input_channels;
 
-    size_t buffer_size = max_block_size * sizeof(float);
+    // Zero-copy approach: we'll point mData at caller's buffers in process()
     for (UInt32 i = 0; i < input_channels; i++) {
         plugin->input_buffer_list->mBuffers[i].mNumberChannels = 1;
-        plugin->input_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
-        // Allocate 16-byte aligned buffer for SIMD operations
-        plugin->input_buffer_list->mBuffers[i].mData = ::operator new(buffer_size, std::align_val_t{16});
-        if (!plugin->input_buffer_list->mBuffers[i].mData) {
-            // Clean up partially allocated buffers
-            for (UInt32 j = 0; j < i; j++) {
-                ::operator delete(plugin->input_buffer_list->mBuffers[j].mData, std::align_val_t{16});
-            }
-            free(plugin->input_buffer_list);
-            plugin->input_buffer_list = nullptr;
-            return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
-        }
+        plugin->input_buffer_list->mBuffers[i].mDataByteSize = 0;  // Updated in process()
+        plugin->input_buffer_list->mBuffers[i].mData = nullptr;    // Updated in process()
     }
 
     // Output buffer (for receiving audio from the plugin)
@@ -375,28 +355,11 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     }
     plugin->output_buffer_list->mNumberBuffers = output_channels;
 
+    // Zero-copy approach: we'll point mData at caller's buffers in process()
     for (UInt32 i = 0; i < output_channels; i++) {
         plugin->output_buffer_list->mBuffers[i].mNumberChannels = 1;
-        plugin->output_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
-        // Allocate 16-byte aligned buffer for SIMD operations
-        plugin->output_buffer_list->mBuffers[i].mData = ::operator new(buffer_size, std::align_val_t{16});
-        if (!plugin->output_buffer_list->mBuffers[i].mData) {
-            // Clean up all allocated buffers
-            for (UInt32 j = 0; j < i; j++) {
-                ::operator delete(plugin->output_buffer_list->mBuffers[j].mData, std::align_val_t{16});
-            }
-            free(plugin->output_buffer_list);
-            for (UInt32 j = 0; j < input_channels; j++) {
-                ::operator delete(plugin->input_buffer_list->mBuffers[j].mData, std::align_val_t{16});
-            }
-            free(plugin->input_buffer_list);
-            plugin->input_buffer_list = nullptr;
-            plugin->output_buffer_list = nullptr;
-            // Clean up AudioUnit instance to prevent leak
-            AudioComponentInstanceDispose(plugin->audio_unit);
-            plugin->audio_unit = nullptr;
-            return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
-        }
+        plugin->output_buffer_list->mBuffers[i].mDataByteSize = 0;  // Updated in process()
+        plugin->output_buffer_list->mBuffers[i].mData = nullptr;    // Updated in process()
     }
 
     // Set up input render callback (for effect plugins)
@@ -538,18 +501,20 @@ int rack_au_plugin_process(
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
-    // Validate channel counts match what plugin was configured with
-    if (num_input_channels != plugin->input_channels || num_output_channels != plugin->output_channels) {
-        return RACK_AU_ERROR_INVALID_PARAM;
+    // Note: Channel count and pointer validation moved to Rust layer (public API)
+    // C++ trusts that Rust has validated inputs correctly
+
+    // Zero-copy: point input buffer list directly at caller's buffers
+    const uint32_t byte_size = frames * sizeof(float);
+    for (uint32_t ch = 0; ch < num_input_channels; ch++) {
+        plugin->input_buffer_list->mBuffers[ch].mData = const_cast<float*>(inputs[ch]);
+        plugin->input_buffer_list->mBuffers[ch].mDataByteSize = byte_size;
     }
 
-    // Copy input channels to AudioUnit buffers (planar → planar, no conversion!)
-    for (uint32_t ch = 0; ch < num_input_channels; ch++) {
-        if (ch < plugin->input_buffer_list->mNumberBuffers) {
-            float* dest = static_cast<float*>(plugin->input_buffer_list->mBuffers[ch].mData);
-            const float* src = inputs[ch];
-            memcpy(dest, src, frames * sizeof(float));
-        }
+    // Zero-copy: point output buffer list directly at caller's buffers
+    for (uint32_t ch = 0; ch < num_output_channels; ch++) {
+        plugin->output_buffer_list->mBuffers[ch].mData = outputs[ch];
+        plugin->output_buffer_list->mBuffers[ch].mDataByteSize = byte_size;
     }
 
     // Set up AudioTimeStamp with running sample position
@@ -573,14 +538,7 @@ int rack_au_plugin_process(
         return RACK_AU_ERROR_AUDIO_UNIT + status;
     }
 
-    // Copy output channels from AudioUnit buffers (planar → planar, no conversion!)
-    for (uint32_t ch = 0; ch < num_output_channels; ch++) {
-        if (ch < plugin->output_buffer_list->mNumberBuffers) {
-            const float* src = static_cast<const float*>(plugin->output_buffer_list->mBuffers[ch].mData);
-            float* dest = outputs[ch];
-            memcpy(dest, src, frames * sizeof(float));
-        }
-    }
+    // Zero-copy: AudioUnit already wrote directly to caller's output buffers
 
     // Update sample position for next call
     plugin->sample_position += frames;

@@ -113,7 +113,21 @@ impl PluginInstance for AudioUnitPlugin {
             return Err(Error::NotInitialized);
         }
 
-        // Validate inputs
+        // Validate channel counts match plugin configuration
+        if inputs.len() != self.input_channels {
+            return Err(Error::Other(format!(
+                "Input channel count mismatch: plugin expects {}, got {}",
+                self.input_channels, inputs.len()
+            )));
+        }
+        if outputs.len() != self.output_channels {
+            return Err(Error::Other(format!(
+                "Output channel count mismatch: plugin expects {}, got {}",
+                self.output_channels, outputs.len()
+            )));
+        }
+
+        // Validate inputs (channel counts are now guaranteed to be correct)
         if inputs.is_empty() || outputs.is_empty() {
             return Err(Error::Other("Empty input or output channels".to_string()));
         }
@@ -1889,5 +1903,44 @@ mod tests {
 
         assert!(result.is_ok(), "process() should succeed with correct channel count");
         println!("✓ Successfully processed with {}/{} channels", input_ch, output_ch);
+    }
+
+    #[test]
+    fn test_process_with_too_many_channels() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        // Create buffers with MORE channels than plugin expects
+        let extra_channels = 2;
+        let inputs: Vec<Vec<f32>> = (0..(input_ch + extra_channels)).map(|_| vec![0.0f32; 512]).collect();
+        let mut outputs: Vec<Vec<f32>> = (0..(output_ch + extra_channels)).map(|_| vec![0.0f32; 512]).collect();
+
+        let input_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
+        let mut output_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        let result = plugin.process(&input_refs, &mut output_refs, 512);
+
+        // Should always fail with too many channels
+        assert!(result.is_err(), "process() should fail when provided more channels than plugin expects");
+
+        // Verify the error message is about channel count mismatch
+        if let Err(e) = result {
+            let err_msg = format!("{:?}", e);
+            assert!(err_msg.contains("channel count mismatch") || err_msg.contains("mismatch"),
+                    "Error should mention channel mismatch, got: {}", err_msg);
+        }
+
+        println!("✓ Correctly rejected too many channels ({}/{} provided vs {}/{} expected)",
+                 input_ch + extra_channels, output_ch + extra_channels, input_ch, output_ch);
     }
 }
