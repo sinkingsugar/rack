@@ -14,6 +14,7 @@ categories = ["multimedia::audio"]
 aligned-vec = "0.6.4"
 smallvec = "1.13"
 thiserror = "2.0"
+cpal = { version = "0.15", optional = true }
 
 [build-dependencies]
 cmake = "0.1"
@@ -22,6 +23,7 @@ cmake = "0.1"
 
 [features]
 default = []
+cpal = ["dep:cpal"]
 
 [[example]]
 name = "list_plugins"
@@ -34,6 +36,11 @@ path = "examples/load_plugin.rs"
 [[example]]
 name = "process_audio"
 path = "examples/process_audio.rs"
+
+[[example]]
+name = "cpal_host"
+path = "examples/cpal_host.rs"
+required-features = ["cpal"]
 
 [profile.dev]
 opt-level = 2  # Audio needs some optimization even in debug

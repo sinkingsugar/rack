@@ -521,8 +521,22 @@ int rack_au_gui_show_window(RackAUGui* gui, const char* title) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
+    // Copy the title string now, before the async block
+    // The title pointer from C might be freed before the block executes
+    NSString* windowTitle = nil;
+    if (title != NULL) {
+        windowTitle = [NSString stringWithUTF8String:title];
+    } else {
+        windowTitle = @"AudioUnit GUI";
+    }
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
+            // Ensure NSApp is initialized (required for windows to appear)
+            // This is safe to call multiple times
+            [NSApplication sharedApplication];
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
             // Get view size
             NSSize viewSize = [gui->view frame].size;
 
@@ -537,16 +551,14 @@ int rack_au_gui_show_window(RackAUGui* gui, const char* title) {
                                                               defer:NO];
 
                 [gui->window setContentView:gui->view];
-
-                if (title != NULL) {
-                    [gui->window setTitle:[NSString stringWithUTF8String:title]];
-                } else {
-                    [gui->window setTitle:@"AudioUnit GUI"];
-                }
+                [gui->window setTitle:windowTitle];
             }
 
+            // Activate the app and bring window to front
+            [NSApp activateIgnoringOtherApps:YES];
             [gui->window makeKeyAndOrderFront:nil];
             [gui->window center];
+            [gui->window setLevel:NSFloatingWindowLevel];  // Keep window on top initially
         }
     });
 

@@ -5,6 +5,14 @@
 //! **IMPORTANT**: This example must be run on the main thread. On macOS, the
 //! main thread is required for all GUI operations (AppKit requirement).
 //!
+//! **Note**: This example uses instrument plugins (synths) which generally have
+//! more stable GUIs. Some Apple effect plugins (like AUBandpass) have buggy
+//! generic UIs that crash in Apple's CoreAudioKit framework.
+//!
+//! **Limitation**: Mouse events may not work perfectly in this terminal-based example
+//! because we're using a minimal event loop. For full interactivity, integrate with
+//! a proper GUI framework like `winit` or embed the view in a native macOS app.
+//!
 //! # Usage
 //!
 //! ```bash
@@ -13,8 +21,55 @@
 
 use rack::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
+
+// Core Foundation and AppKit bindings for running the macOS event loop
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFRunLoopRunInMode(
+        mode: CFRunLoopMode,
+        seconds: f64,
+        return_after_source_handled: bool,
+    ) -> i32;
+
+    static kCFRunLoopDefaultMode: CFRunLoopMode;
+}
+
+type CFRunLoopMode = *const std::ffi::c_void;
+
+/// Process macOS main event loop for a short duration
+fn process_main_event_loop(duration_ms: u64) {
+    unsafe {
+        CFRunLoopRunInMode(
+            kCFRunLoopDefaultMode,
+            duration_ms as f64 / 1000.0,
+            false,
+        );
+    }
+}
+
+/// Run the main event loop indefinitely
+/// This is required for GUI windows to actually appear and be interactive
+fn run_event_loop() {
+    println!("Starting event loop...");
+
+    // Just keep processing events in a loop
+    // The window will stay alive as long as we keep processing
+    loop {
+        unsafe {
+            // Process events for 1 second at a time
+            // This allows the window to be interactive
+            CFRunLoopRunInMode(
+                kCFRunLoopDefaultMode,
+                1.0,
+                true,  // Return after source handled
+            );
+        }
+
+        // Small sleep to avoid busy-waiting
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
 
 fn main() -> Result<()> {
     println!("AudioUnit Plugin GUI Example");
@@ -35,11 +90,18 @@ fn main() -> Result<()> {
 
     println!("Found {} plugin(s)\n", plugins.len());
 
-    // Find first instrument or effect plugin (more likely to have interesting GUIs)
+    // Find first instrument plugin (instruments usually have better/more stable GUIs)
+    // Avoid AUBandpass and other Apple effects that have buggy generic UIs
     let plugin_info = plugins
         .iter()
         .find(|p| {
-            p.plugin_type == PluginType::Instrument || p.plugin_type == PluginType::Effect
+            p.plugin_type == PluginType::Instrument
+        })
+        .or_else(|| {
+            // If no instrument, try to find an effect that's NOT AUBandpass
+            plugins.iter().find(|p| {
+                p.plugin_type == PluginType::Effect && !p.name.contains("Bandpass")
+            })
         })
         .or_else(|| plugins.first());
 
@@ -114,41 +176,41 @@ fn main() -> Result<()> {
     println!("GUI creation initiated...");
     println!("Waiting for window to be created and displayed...\n");
 
-    // Simple event loop - in a real application, you'd use a proper event loop
-    // or integrate with your UI framework
-    let mut iterations = 0;
-    loop {
-        thread::sleep(Duration::from_millis(100));
+    // Wait a moment for the GUI to be created
+    println!("Processing events...");
+    for _ in 0..30 {
+        process_main_event_loop(100);
 
-        // Check if GUI was created
-        {
-            let gui = gui_handle.lock().unwrap();
-            if gui.is_some() {
-                iterations += 1;
-
-                // After 50 iterations (5 seconds), show some info
-                if iterations == 50 {
-                    println!("The window should still be visible.");
-                    println!("You can interact with the plugin GUI.");
-                    println!("Press Ctrl+C to exit.\n");
-                }
-
-                // Optional: break after some time for automated testing
-                // Uncomment to make example exit automatically:
-                // if iterations > 100 {
-                //     println!("Example complete. Exiting...");
-                //     break;
-                // }
-            } else if iterations > 30 {
-                // Timeout after 3 seconds if GUI wasn't created
-                println!("Timeout waiting for GUI creation");
-                break;
-            }
+        let gui = gui_handle.lock().unwrap();
+        if gui.is_some() {
+            println!("\n✓ GUI window should now be visible!");
+            println!("The window will stay open. Press Ctrl+C to exit.\n");
+            drop(gui);
+            break;
         }
     }
 
-    // GUI will be automatically destroyed when gui_handle goes out of scope
+    // Check if GUI was created
+    {
+        let gui = gui_handle.lock().unwrap();
+        if gui.is_none() {
+            println!("Timeout waiting for GUI creation");
+            return Ok(());
+        }
+    }
+
+    // Now run the main event loop to keep the window alive and interactive
+    // This will block until the user closes the window or presses Ctrl+C
+    println!("Running event loop (window is now interactive)...");
+    run_event_loop();
+
+    // Cleanup when event loop exits
     println!("\nCleaning up...");
+    {
+        let mut gui = gui_handle.lock().unwrap();
+        *gui = None;
+    }
+
     println!("✓ Example complete!");
 
     Ok(())

@@ -106,6 +106,9 @@ cargo run --example preset_browser
 
 # Plugin GUI (shows native plugin UI)
 cargo run --example plugin_gui
+
+# Real-time audio host with CPAL (requires 'cpal' feature)
+cargo run --example cpal_host --features cpal
 ```
 
 ### Display Plugin GUI
