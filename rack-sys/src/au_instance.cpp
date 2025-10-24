@@ -23,6 +23,10 @@ struct RackAUPlugin {
     AudioBufferList* input_buffer_list;
     AudioBufferList* output_buffer_list;
 
+    // Channel configuration (queried from AudioUnit during initialize)
+    uint32_t input_channels;
+    uint32_t output_channels;
+
     // Sample position tracking for AudioTimeStamp
     int64_t sample_position;
 
@@ -148,6 +152,8 @@ RackAUPlugin* rack_au_plugin_new(const char* unique_id) {
     plugin->max_block_size = 0;
     plugin->input_buffer_list = nullptr;
     plugin->output_buffer_list = nullptr;
+    plugin->input_channels = 0;
+    plugin->output_channels = 0;
     plugin->sample_position = 0;
     plugin->parameter_ids = nullptr;
     plugin->parameter_info = nullptr;
@@ -243,16 +249,19 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     plugin->sample_rate = sample_rate;
     plugin->max_block_size = max_block_size;
 
-    // Set up audio stream format (stereo, interleaved, 32-bit float)
+    // Default to stereo for compatibility - query actual config after initialization
+    uint32_t channels = 2;
+
+    // Set up audio stream format (planar/non-interleaved, 32-bit float)
     AudioStreamBasicDescription format;
     memset(&format, 0, sizeof(format));
     format.mSampleRate = sample_rate;
     format.mFormatID = kAudioFormatLinearPCM;
-    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
     format.mBitsPerChannel = 32;
-    format.mChannelsPerFrame = 2;  // Stereo
+    format.mChannelsPerFrame = channels;
     format.mFramesPerPacket = 1;
-    format.mBytesPerFrame = sizeof(float) * 2;  // 2 channels interleaved
+    format.mBytesPerFrame = sizeof(float);  // Per channel (non-interleaved)
     format.mBytesPerPacket = format.mBytesPerFrame * format.mFramesPerPacket;
 
     // Try to set the format on both input and output scopes
@@ -298,19 +307,45 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
         // MaximumFramesPerSlice might not be supported by all plugins, continue anyway
     }
 
-    // Allocate audio buffers for non-interleaved format
-    // NOTE: Phase 4 limitation - hardcoded to stereo (2 channels)
-    // TODO (Phase 6+): Query plugin's actual channel configuration and support mono/surround
+    // Query actual channel configuration after setting format
+    AudioStreamBasicDescription actual_input_format;
+    UInt32 size_of_format = sizeof(actual_input_format);
+    OSStatus query_status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_StreamFormat,
+        kAudioUnitScope_Input,
+        0,
+        &actual_input_format,
+        &size_of_format
+    );
+    uint32_t input_channels = (query_status == noErr) ? actual_input_format.mChannelsPerFrame : channels;
+
+    AudioStreamBasicDescription actual_output_format;
+    query_status = AudioUnitGetProperty(
+        plugin->audio_unit,
+        kAudioUnitProperty_StreamFormat,
+        kAudioUnitScope_Output,
+        0,
+        &actual_output_format,
+        &size_of_format
+    );
+    uint32_t output_channels = (query_status == noErr) ? actual_output_format.mChannelsPerFrame : channels;
+
+    // Store channel configuration
+    plugin->input_channels = input_channels;
+    plugin->output_channels = output_channels;
+
+    // Allocate audio buffers for planar/non-interleaved format
     // Input buffer (for providing audio to effect plugins)
-    size_t buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * 2);
+    size_t buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * input_channels);
     plugin->input_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
     if (!plugin->input_buffer_list) {
         return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
     }
-    plugin->input_buffer_list->mNumberBuffers = 2;  // Stereo only
+    plugin->input_buffer_list->mNumberBuffers = input_channels;
 
     size_t buffer_size = max_block_size * sizeof(float);
-    for (UInt32 i = 0; i < 2; i++) {
+    for (UInt32 i = 0; i < input_channels; i++) {
         plugin->input_buffer_list->mBuffers[i].mNumberChannels = 1;
         plugin->input_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
         // Allocate 16-byte aligned buffer for SIMD operations
@@ -327,19 +362,20 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     }
 
     // Output buffer (for receiving audio from the plugin)
-    plugin->output_buffer_list = static_cast<AudioBufferList*>(malloc(buffer_list_size));
+    size_t output_buffer_list_size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * output_channels);
+    plugin->output_buffer_list = static_cast<AudioBufferList*>(malloc(output_buffer_list_size));
     if (!plugin->output_buffer_list) {
         // Clean up input buffers
-        for (UInt32 i = 0; i < 2; i++) {
+        for (UInt32 i = 0; i < input_channels; i++) {
             ::operator delete(plugin->input_buffer_list->mBuffers[i].mData, std::align_val_t{16});
         }
         free(plugin->input_buffer_list);
         plugin->input_buffer_list = nullptr;
         return RACK_AU_ERROR_GENERIC;  // Memory allocation failed
     }
-    plugin->output_buffer_list->mNumberBuffers = 2;
+    plugin->output_buffer_list->mNumberBuffers = output_channels;
 
-    for (UInt32 i = 0; i < 2; i++) {
+    for (UInt32 i = 0; i < output_channels; i++) {
         plugin->output_buffer_list->mBuffers[i].mNumberChannels = 1;
         plugin->output_buffer_list->mBuffers[i].mDataByteSize = buffer_size;
         // Allocate 16-byte aligned buffer for SIMD operations
@@ -350,7 +386,7 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
                 ::operator delete(plugin->output_buffer_list->mBuffers[j].mData, std::align_val_t{16});
             }
             free(plugin->output_buffer_list);
-            for (UInt32 j = 0; j < 2; j++) {
+            for (UInt32 j = 0; j < input_channels; j++) {
                 ::operator delete(plugin->input_buffer_list->mBuffers[j].mData, std::align_val_t{16});
             }
             free(plugin->input_buffer_list);
@@ -389,14 +425,14 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
     if (status != noErr) {
         // Clean up buffers on failure
         if (plugin->input_buffer_list) {
-            for (UInt32 i = 0; i < 2; i++) {
+            for (UInt32 i = 0; i < input_channels; i++) {
                 ::operator delete(plugin->input_buffer_list->mBuffers[i].mData, std::align_val_t{16});
             }
             free(plugin->input_buffer_list);
             plugin->input_buffer_list = nullptr;
         }
         if (plugin->output_buffer_list) {
-            for (UInt32 i = 0; i < 2; i++) {
+            for (UInt32 i = 0; i < output_channels; i++) {
                 ::operator delete(plugin->output_buffer_list->mBuffers[i].mData, std::align_val_t{16});
             }
             free(plugin->output_buffer_list);
@@ -1135,6 +1171,24 @@ int rack_au_plugin_send_midi(
     }
 
     return RACK_AU_OK;
+}
+
+// ============================================================================
+// Channel Count Query
+// ============================================================================
+
+int rack_au_plugin_get_input_channels(RackAUPlugin* plugin) {
+    if (!plugin || !plugin->initialized) {
+        return 0;
+    }
+    return static_cast<int>(plugin->input_channels);
+}
+
+int rack_au_plugin_get_output_channels(RackAUPlugin* plugin) {
+    if (!plugin || !plugin->initialized) {
+        return 0;
+    }
+    return static_cast<int>(plugin->output_channels);
 }
 
 // ============================================================================

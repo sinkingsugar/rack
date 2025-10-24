@@ -168,6 +168,32 @@ extern "C" {
     /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     pub fn rack_au_plugin_is_initialized(plugin: *mut RackAUPlugin) -> c_int;
 
+    /// Get input channel count
+    ///
+    /// # Returns
+    ///
+    /// - Number of input channels (>= 0)
+    /// - 0 if not initialized or query failed
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Should be called after `rack_au_plugin_initialize`
+    pub fn rack_au_plugin_get_input_channels(plugin: *mut RackAUPlugin) -> c_int;
+
+    /// Get output channel count
+    ///
+    /// # Returns
+    ///
+    /// - Number of output channels (>= 0)
+    /// - 0 if not initialized or query failed
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Should be called after `rack_au_plugin_initialize`
+    pub fn rack_au_plugin_get_output_channels(plugin: *mut RackAUPlugin) -> c_int;
+
     /// Process audio through the plugin (planar format)
     ///
     /// Uses planar (non-interleaved) audio format - one buffer per channel.
@@ -197,7 +223,7 @@ extern "C" {
         plugin: *mut RackAUPlugin,
         inputs: *const *const f32,
         num_input_channels: u32,
-        outputs: *mut *mut f32,
+        outputs: *const *mut f32,
         num_output_channels: u32,
         frames: u32,
     ) -> c_int;

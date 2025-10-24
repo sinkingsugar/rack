@@ -85,6 +85,16 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
 // Check if plugin is initialized
 int rack_au_plugin_is_initialized(RackAUPlugin* plugin);
 
+// Get input channel count
+// Returns number of input channels, or 0 if not initialized or query failed
+// Thread-safety: Should be called after initialize()
+int rack_au_plugin_get_input_channels(RackAUPlugin* plugin);
+
+// Get output channel count
+// Returns number of output channels, or 0 if not initialized or query failed
+// Thread-safety: Should be called after initialize()
+int rack_au_plugin_get_output_channels(RackAUPlugin* plugin);
+
 // Process audio (planar format - one buffer per channel)
 // Uses planar (non-interleaved) audio format matching AudioUnit internal format.
 // This enables zero-copy processing in effect chains.
@@ -105,7 +115,7 @@ int rack_au_plugin_process(
     RackAUPlugin* plugin,
     const float* const* inputs,
     uint32_t num_input_channels,
-    float* const* outputs,
+    float* const* const outputs,
     uint32_t num_output_channels,
     uint32_t frames
 );

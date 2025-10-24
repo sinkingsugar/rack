@@ -18,6 +18,12 @@ use super::util::map_error;
 pub struct AudioUnitPlugin {
     inner: NonNull<ffi::RackAUPlugin>,
     info: PluginInfo,
+    // Pre-allocated pointer arrays for zero-allocation process() calls
+    input_ptrs: Vec<*const f32>,
+    output_ptrs: Vec<*mut f32>,
+    // Channel configuration (queried from AudioUnit during initialize)
+    input_channels: usize,
+    output_channels: usize,
     // PhantomData<*const ()> makes this type !Sync while keeping it Send
     _not_sync: PhantomData<*const ()>,
 }
@@ -50,6 +56,10 @@ impl AudioUnitPlugin {
             Ok(Self {
                 inner: NonNull::new_unchecked(ptr),
                 info: info.clone(),
+                input_ptrs: Vec::new(),
+                output_ptrs: Vec::new(),
+                input_channels: 0,
+                output_channels: 0,
                 _not_sync: PhantomData,
             })
         }
@@ -68,6 +78,26 @@ impl PluginInstance for AudioUnitPlugin {
             if result != ffi::RACK_AU_OK {
                 return Err(map_error(result));
             }
+
+            // Query actual channel configuration
+            let input_channels = ffi::rack_au_plugin_get_input_channels(self.inner.as_ptr());
+            let output_channels = ffi::rack_au_plugin_get_output_channels(self.inner.as_ptr());
+
+            if input_channels < 0 || output_channels < 0 {
+                return Err(Error::Other("Failed to query channel configuration".to_string()));
+            }
+
+            self.input_channels = input_channels as usize;
+            self.output_channels = output_channels as usize;
+
+            // Pre-allocate pointer arrays for zero-allocation process() calls
+            // Reserve capacity to avoid reallocation even if channel counts are unusual
+            self.input_ptrs = Vec::with_capacity(self.input_channels.max(8));
+            self.output_ptrs = Vec::with_capacity(self.output_channels.max(8));
+
+            // Initialize with null pointers (will be filled in process())
+            self.input_ptrs.resize(self.input_channels, std::ptr::null());
+            self.output_ptrs.resize(self.output_channels, std::ptr::null_mut());
 
             Ok(())
         }
@@ -111,16 +141,21 @@ impl PluginInstance for AudioUnitPlugin {
             }
         }
 
-        // Create pointer arrays for FFI
-        let input_ptrs: Vec<*const f32> = inputs.iter().map(|ch| ch.as_ptr()).collect();
-        let mut output_ptrs: Vec<*mut f32> = outputs.iter_mut().map(|ch| ch.as_mut_ptr()).collect();
+        // Reuse pre-allocated pointer arrays (zero-allocation hot path)
+        // Fill with current buffer pointers
+        for (i, input_ch) in inputs.iter().enumerate() {
+            self.input_ptrs[i] = input_ch.as_ptr();
+        }
+        for (i, output_ch) in outputs.iter_mut().enumerate() {
+            self.output_ptrs[i] = output_ch.as_mut_ptr();
+        }
 
         unsafe {
             let result = ffi::rack_au_plugin_process(
                 self.inner.as_ptr(),
-                input_ptrs.as_ptr(),
+                self.input_ptrs.as_ptr(),
                 inputs.len() as u32,
-                output_ptrs.as_mut_ptr(),
+                self.output_ptrs.as_ptr(),
                 outputs.len() as u32,
                 num_frames as u32,
             );
