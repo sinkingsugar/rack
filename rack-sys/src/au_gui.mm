@@ -131,6 +131,11 @@ static NSView* create_generic_ui(AudioComponentInstance audio_unit, NSMutableArr
         // Get parameter IDs
         UInt32 size = param_count * sizeof(AudioUnitParameterID);
         AudioUnitParameterID* param_ids = (AudioUnitParameterID*)malloc(size);
+        if (!param_ids) {
+            // Memory allocation failed
+            return stackView;
+        }
+
         OSStatus status = AudioUnitGetProperty(
             audio_unit,
             kAudioUnitProperty_ParameterList,
@@ -290,49 +295,49 @@ static NSView* try_load_auv2_gui(AudioComponentInstance audio_unit) {
             return nil;
         }
 
-        // Convert CFURLRef to NSURL
-        // AudioUnitGetProperty returns owned CF objects (Create Rule)
-        // __bridge doesn't transfer ownership to ARC, so manual CFRelease required
-        NSURL* bundleURL = (__bridge NSURL*)viewInfo.mCocoaAUViewBundleLocation;
-        NSBundle* viewBundle = [NSBundle bundleWithURL:bundleURL];
+        // Use @try/@finally to ensure CFRelease happens even if exceptions occur
+        NSView* auView = nil;
+        @try {
+            // Convert CFURLRef to NSURL
+            // AudioUnitGetProperty returns owned CF objects (Create Rule)
+            // __bridge doesn't transfer ownership to ARC, so manual CFRelease required
+            NSURL* bundleURL = (__bridge NSURL*)viewInfo.mCocoaAUViewBundleLocation;
+            NSBundle* viewBundle = [NSBundle bundleWithURL:bundleURL];
 
-        if (viewBundle == nil) {
+            if (viewBundle == nil) {
+                return nil;
+            }
+
+            // Get view class name
+            NSString* viewClassName = (__bridge NSString*)viewInfo.mCocoaAUViewClass[0];
+            Class viewClass = [viewBundle classNamed:viewClassName];
+
+            if (viewClass == nil) {
+                return nil;
+            }
+
+            // Create view instance
+            // The view class should have an initWithAudioUnit: method
+            if ([viewClass instancesRespondToSelector:@selector(initWithAudioUnit:)]) {
+                // Use NSInvocation to avoid performSelector warning
+                SEL selector = @selector(initWithAudioUnit:);
+                NSMethodSignature *signature = [viewClass instanceMethodSignatureForSelector:selector];
+                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                [invocation setSelector:selector];
+                id instance = [[viewClass alloc] init];
+                [invocation setTarget:instance];
+                [invocation setArgument:&audio_unit atIndex:2]; // arg 0 is self, arg 1 is _cmd
+                [invocation invoke];
+                [invocation getReturnValue:&auView];
+            }
+        }
+        @finally {
+            // Always clean up CoreFoundation objects, even if exception thrown
             CFRelease(viewInfo.mCocoaAUViewBundleLocation);
             if (viewInfo.mCocoaAUViewClass[0] != NULL) {
                 CFRelease(viewInfo.mCocoaAUViewClass[0]);
             }
-            return nil;
         }
-
-        // Get view class name
-        NSString* viewClassName = (__bridge NSString*)viewInfo.mCocoaAUViewClass[0];
-        Class viewClass = [viewBundle classNamed:viewClassName];
-
-        if (viewClass == nil) {
-            CFRelease(viewInfo.mCocoaAUViewBundleLocation);
-            CFRelease(viewInfo.mCocoaAUViewClass[0]);
-            return nil;
-        }
-
-        // Create view instance
-        // The view class should have an initWithAudioUnit: method
-        NSView* auView = nil;
-        if ([viewClass instancesRespondToSelector:@selector(initWithAudioUnit:)]) {
-            // Use NSInvocation to avoid performSelector warning
-            SEL selector = @selector(initWithAudioUnit:);
-            NSMethodSignature *signature = [viewClass instanceMethodSignatureForSelector:selector];
-            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-            [invocation setSelector:selector];
-            id instance = [[viewClass alloc] init];
-            [invocation setTarget:instance];
-            [invocation setArgument:&audio_unit atIndex:2]; // arg 0 is self, arg 1 is _cmd
-            [invocation invoke];
-            [invocation getReturnValue:&auView];
-        }
-
-        // Clean up CoreFoundation objects
-        CFRelease(viewInfo.mCocoaAUViewBundleLocation);
-        CFRelease(viewInfo.mCocoaAUViewClass[0]);
 
         return auView;
     }
@@ -430,14 +435,15 @@ void rack_au_gui_create_async(
 
 // Destroy GUI and clean up resources
 // IMPORTANT: gui pointer becomes invalid immediately after this call
-// Cleanup happens asynchronously on main thread to avoid deadlocks
+// Cleanup happens synchronously if on main thread, else dispatches to main thread
 // Rust Drop impl ensures this is safe (ownership transferred)
 void rack_au_gui_destroy(RackAUGui* gui) {
     if (!gui) {
         return;
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    // Lambda for cleanup code (used in both sync and async paths)
+    auto cleanup = ^{
         @autoreleasepool {
             // Close window if we created one
             if (gui->window != nil) {
@@ -463,7 +469,15 @@ void rack_au_gui_destroy(RackAUGui* gui) {
 
             delete gui;
         }
-    });
+    };
+
+    // If already on main thread, cleanup synchronously to avoid race conditions
+    // Otherwise dispatch to main thread (required for AppKit operations)
+    if ([NSThread isMainThread]) {
+        cleanup();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), cleanup);
+    }
 }
 
 // Get native NSView pointer for embedding in host UI
@@ -482,10 +496,18 @@ int rack_au_gui_get_size(RackAUGui* gui, float* width, float* height) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
-    __block NSSize size;
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    NSSize size;
+    if ([NSThread isMainThread]) {
+        // Already on main thread, get size directly
         size = [gui->view frame].size;
-    });
+    } else {
+        // Not on main thread, dispatch to main thread
+        __block NSSize blockSize;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            blockSize = [gui->view frame].size;
+        });
+        size = blockSize;
+    }
 
     *width = size.width;
     *height = size.height;
