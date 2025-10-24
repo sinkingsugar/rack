@@ -51,10 +51,12 @@ fn main() -> Result<()> {
         println!("✓ Plugin initialized successfully!");
         println!();
 
-        // Create aligned test buffers (512 frames of stereo audio = 1024 samples)
+        // Create test buffers (planar format - separate buffer per channel)
         let frames = 512;
-        let mut input = AudioBuffer::new(frames * 2);
-        let mut output = AudioBuffer::new(frames * 2);
+        let mut left_in = vec![0.0f32; frames];
+        let mut right_in = vec![0.0f32; frames];
+        let mut left_out = vec![0.0f32; frames];
+        let mut right_out = vec![0.0f32; frames];
 
         println!("Generating test signal (440 Hz sine wave)...");
         let frequency = 440.0f32; // A4
@@ -63,16 +65,20 @@ fn main() -> Result<()> {
         for i in 0..frames {
             let t = i as f32 / sample_rate;
             let sample = (2.0 * std::f32::consts::PI * frequency * t).sin() * 0.5;
-            input[i * 2] = sample; // Left channel
-            input[i * 2 + 1] = sample; // Right channel
+            left_in[i] = sample;  // Left channel
+            right_in[i] = sample; // Right channel
         }
 
-        println!("✓ Test signal generated ({} frames, stereo)", frames);
+        println!("✓ Test signal generated ({} frames, stereo planar)", frames);
         println!();
 
-        // Process audio
+        // Process audio (planar format)
         println!("Processing audio through plugin...");
-        plugin.process(&input, &mut output)?;
+        plugin.process(
+            &[&left_in, &right_in],
+            &mut [&mut left_out, &mut right_out],
+            frames
+        )?;
         println!("✓ Audio processing complete!");
         println!();
 
@@ -80,21 +86,23 @@ fn main() -> Result<()> {
         println!("Analyzing output:");
 
         // Calculate RMS (Root Mean Square) level
-        let rms: f32 = output
-            .iter()
+        let output_samples = left_out.len() + right_out.len();
+        let rms: f32 = (left_out.iter().chain(right_out.iter())
             .map(|&sample| sample * sample)
             .sum::<f32>()
-            / output.len() as f32;
-        let rms = rms.sqrt();
+            / output_samples as f32)
+            .sqrt();
 
         println!("  RMS level: {:.6}", rms);
 
         // Find peak level
-        let peak = output.iter().fold(0.0f32, |max, &sample| max.max(sample.abs()));
+        let peak = left_out.iter().chain(right_out.iter())
+            .fold(0.0f32, |max, &sample| max.max(sample.abs()));
         println!("  Peak level: {:.6}", peak);
 
         // Check if output has signal
-        let has_signal = output.iter().any(|&sample| sample != 0.0);
+        let has_signal = left_out.iter().chain(right_out.iter())
+            .any(|&sample| sample != 0.0);
         if has_signal {
             println!("  Signal: ✓ Output contains audio");
         } else {
@@ -102,12 +110,12 @@ fn main() -> Result<()> {
         }
 
         // Compare input and output
-        let input_rms: f32 = input
-            .iter()
+        let input_samples = left_in.len() + right_in.len();
+        let input_rms: f32 = (left_in.iter().chain(right_in.iter())
             .map(|&sample| sample * sample)
             .sum::<f32>()
-            / input.len() as f32;
-        let input_rms = input_rms.sqrt();
+            / input_samples as f32)
+            .sqrt();
 
         println!();
         println!("Comparison:");

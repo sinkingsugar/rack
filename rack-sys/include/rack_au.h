@@ -85,12 +85,40 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
 // Check if plugin is initialized
 int rack_au_plugin_is_initialized(RackAUPlugin* plugin);
 
-// Process audio
-// input: input buffer (interleaved stereo)
-// output: output buffer (interleaved stereo)
+// Get input channel count
+// Returns number of input channels, or 0 if not initialized or query failed
+// Thread-safety: Should be called after initialize()
+int rack_au_plugin_get_input_channels(RackAUPlugin* plugin);
+
+// Get output channel count
+// Returns number of output channels, or 0 if not initialized or query failed
+// Thread-safety: Should be called after initialize()
+int rack_au_plugin_get_output_channels(RackAUPlugin* plugin);
+
+// Process audio (planar format - one buffer per channel)
+// Uses planar (non-interleaved) audio format matching AudioUnit internal format.
+// This enables zero-copy processing in effect chains.
+//
+// inputs: array of input channel pointers (e.g., [left_ptr, right_ptr] for stereo)
+// num_input_channels: number of input channels
+// outputs: array of output channel pointers (e.g., [left_ptr, right_ptr] for stereo)
+// num_output_channels: number of output channels
 // frames: number of frames to process
+//
+// Channel Layout Examples:
+//   Mono:   inputs = [mono_ptr], num_input_channels = 1
+//   Stereo: inputs = [left_ptr, right_ptr], num_input_channels = 2
+//   5.1:    inputs = [L, R, C, LFE, SL, SR], num_input_channels = 6
+//
 // Returns 0 on success, negative error code on failure
-int rack_au_plugin_process(RackAUPlugin* plugin, const float* input, float* output, uint32_t frames);
+int rack_au_plugin_process(
+    RackAUPlugin* plugin,
+    const float* const* inputs,
+    uint32_t num_input_channels,
+    float* const* outputs,
+    uint32_t num_output_channels,
+    uint32_t frames
+);
 
 // Get parameter count
 // Thread-safety: Read-only after initialization. Safe to call from any thread,

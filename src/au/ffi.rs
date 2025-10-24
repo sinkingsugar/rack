@@ -168,7 +168,36 @@ extern "C" {
     /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     pub fn rack_au_plugin_is_initialized(plugin: *mut RackAUPlugin) -> c_int;
 
-    /// Process audio through the plugin
+    /// Get input channel count
+    ///
+    /// # Returns
+    ///
+    /// - Number of input channels (>= 0)
+    /// - 0 if not initialized or query failed
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Should be called after `rack_au_plugin_initialize`
+    pub fn rack_au_plugin_get_input_channels(plugin: *mut RackAUPlugin) -> c_int;
+
+    /// Get output channel count
+    ///
+    /// # Returns
+    ///
+    /// - Number of output channels (>= 0)
+    /// - 0 if not initialized or query failed
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Should be called after `rack_au_plugin_initialize`
+    pub fn rack_au_plugin_get_output_channels(plugin: *mut RackAUPlugin) -> c_int;
+
+    /// Process audio through the plugin (planar format)
+    ///
+    /// Uses planar (non-interleaved) audio format - one buffer per channel.
+    /// This matches AudioUnit's internal format, enabling zero-copy processing.
     ///
     /// # Returns
     ///
@@ -178,15 +207,24 @@ extern "C" {
     /// # Safety
     ///
     /// - `plugin` must be a valid pointer and initialized
-    /// - `input` must point to a buffer with at least `frames * 2` f32 values (stereo interleaved)
-    /// - `output` must point to a buffer with space for at least `frames * 2` f32 values (stereo interleaved)
+    /// - `inputs` must point to an array of `num_input_channels` const f32 pointers
+    /// - Each input channel pointer must point to a buffer with at least `frames` f32 values
+    /// - `outputs` must point to an array of `num_output_channels` mutable f32 pointers
+    /// - Each output channel pointer must point to a buffer with space for at least `frames` f32 values
     /// - `frames` must not exceed the `max_block_size` from initialization
-    /// - Buffers must not overlap unless input == output (in-place processing)
+    /// - Input and output buffers must not overlap unless doing in-place processing
     /// - Must not be called concurrently on the same plugin from multiple threads
+    ///
+    /// # Channel Layout
+    ///
+    /// For stereo: inputs/outputs = [left_ptr, right_ptr], num_channels = 2
+    /// For mono: inputs/outputs = [mono_ptr], num_channels = 1
     pub fn rack_au_plugin_process(
         plugin: *mut RackAUPlugin,
-        input: *const f32,
-        output: *mut f32,
+        inputs: *const *const f32,
+        num_input_channels: u32,
+        outputs: *const *mut f32,
+        num_output_channels: u32,
         frames: u32,
     ) -> c_int;
 

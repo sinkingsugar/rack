@@ -14,7 +14,8 @@ Rack is a cross-platform library for discovering, loading, and processing audio 
 ## Features
 
 - ✅ **AudioUnit support** (macOS) - complete with scanning, loading, processing, parameters, MIDI, presets, and GUI
-- 🎵 **SIMD-optimized audio processing** - ARM NEON and x86_64 SSE2 for 4x performance
+- ⚡ **Zero-copy audio processing** - planar format with pointer assignment (eliminated 2 of 3 memcpy operations)
+- 🎵 **SIMD-optimized** - ARM NEON and x86_64 SSE2 for 4x performance
 - 🎹 **Zero-allocation MIDI** - SmallVec-based MIDI for real-time performance
 - 🎛️ **GUI support** - AUv3, AUv2, and generic fallback UI
 - 🎚️ **Clean, safe API** - minimal unsafe code, comprehensive error handling
@@ -62,10 +63,17 @@ fn main() -> Result<()> {
     let mut plugin = scanner.load(&plugins[0])?;
     plugin.initialize(48000.0, 512)?;
 
-    // Process audio with aligned buffers
-    let input = AudioBuffer::new(1024);  // 512 frames stereo
-    let mut output = AudioBuffer::new(1024);
-    plugin.process(&input, &mut output)?;
+    // Process audio with planar buffers (zero-copy)
+    let left_in = vec![0.0f32; 512];
+    let right_in = vec![0.0f32; 512];
+    let mut left_out = vec![0.0f32; 512];
+    let mut right_out = vec![0.0f32; 512];
+
+    plugin.process(
+        &[&left_in, &right_in],
+        &mut [&mut left_out, &mut right_out],
+        512
+    )?;
 
     Ok(())
 }
@@ -169,6 +177,8 @@ This allows different plugin formats to implement the same interface, making you
 - [x] Plugin scanning and enumeration
 - [x] Plugin loading and instantiation
 - [x] Audio processing with SIMD optimization (ARM NEON + x86_64 SSE2)
+- [x] Zero-copy planar audio API (eliminated 2 of 3 memcpy operations)
+- [x] Dynamic channel count support (mono/stereo/surround)
 - [x] Parameter control with caching
 - [x] MIDI support (zero-allocation, all MIDI 1.0 messages)
 - [x] Preset management (factory presets + state serialization)

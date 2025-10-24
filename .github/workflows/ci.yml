@@ -59,17 +59,22 @@ jobs:
     - name: Run Rust tests
       run: cargo test --verbose
 
-    - name: Build examples
+    - name: Build all examples
       run: |
+        echo "Building all examples..."
         cargo build --example list_plugins --verbose
         cargo build --example load_plugin --verbose
+        cargo build --example process_audio --verbose
+        cargo build --example simple_synth --verbose
+        cargo build --example cpal_host --verbose --features cpal
+        cargo build --example plugin_gui --verbose
+        echo "✓ All examples built successfully"
 
     - name: Run list_plugins example
       run: |
         output=$(cargo run --example list_plugins 2>&1)
         exit_code=$?
         echo "$output"
-        # Verify that the example ran successfully
         if [ $exit_code -ne 0 ]; then
           echo "ERROR: list_plugins example failed"
           exit 1
@@ -81,7 +86,6 @@ jobs:
         output=$(cargo run --example load_plugin 2>&1)
         exit_code=$?
         echo "$output"
-        # Verify that the example ran successfully and initialized a plugin
         if [ $exit_code -ne 0 ]; then
           echo "ERROR: load_plugin example failed"
           exit 1
@@ -91,3 +95,33 @@ jobs:
           exit 1
         fi
         echo "✓ load_plugin example completed successfully"
+
+    - name: Run process_audio example
+      run: |
+        output=$(cargo run --example process_audio 2>&1)
+        exit_code=$?
+        echo "$output"
+        if [ $exit_code -ne 0 ]; then
+          echo "ERROR: process_audio example failed"
+          exit 1
+        fi
+        if ! echo "$output" | grep -q "Audio processing complete"; then
+          echo "ERROR: Audio processing did not complete"
+          exit 1
+        fi
+        echo "✓ process_audio example completed successfully"
+
+    - name: Run simple_synth example
+      run: |
+        output=$(cargo run --example simple_synth 2>&1)
+        exit_code=$?
+        echo "$output"
+        if [ $exit_code -ne 0 ]; then
+          echo "ERROR: simple_synth example failed"
+          exit 1
+        fi
+        if ! echo "$output" | grep -q "Synthesis complete"; then
+          echo "ERROR: Synthesis did not complete"
+          exit 1
+        fi
+        echo "✓ simple_synth example completed successfully"

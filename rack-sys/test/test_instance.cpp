@@ -251,26 +251,35 @@ void test_audio_processing() {
         return;
     }
 
-    // Create test buffers (512 frames of stereo audio)
+    // Create test buffers (512 frames, planar stereo - separate left/right)
     const uint32_t frames = 512;
-    float* input = new float[frames * 2];
-    float* output = new float[frames * 2];
+    const uint32_t num_channels = 2;
+    float* left_in = new float[frames];
+    float* right_in = new float[frames];
+    float* left_out = new float[frames];
+    float* right_out = new float[frames];
 
     // Fill input with a simple sine wave
     const float frequency = 440.0f; // A4
     const float sample_rate = 48000.0f;
     for (uint32_t i = 0; i < frames; i++) {
         float sample = sinf(2.0f * 3.14159265f * frequency * i / sample_rate) * 0.5f;
-        input[i * 2] = sample;      // Left channel
-        input[i * 2 + 1] = sample;  // Right channel
+        left_in[i] = sample;
+        right_in[i] = sample;
     }
 
-    // Process audio
-    result = rack_au_plugin_process(plugin, input, output, frames);
+    // Create pointer arrays for planar API
+    const float* inputs[2] = { left_in, right_in };
+    float* outputs[2] = { left_out, right_out };
+
+    // Process audio (planar format)
+    result = rack_au_plugin_process(plugin, inputs, num_channels, outputs, num_channels, frames);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Audio processing failed (error: " << result << ")\n";
-        delete[] input;
-        delete[] output;
+        delete[] left_in;
+        delete[] right_in;
+        delete[] left_out;
+        delete[] right_out;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -281,8 +290,8 @@ void test_audio_processing() {
 
     // Verify output is not all zeros (plugin did something)
     bool has_signal = false;
-    for (uint32_t i = 0; i < frames * 2; i++) {
-        if (output[i] != 0.0f) {
+    for (uint32_t i = 0; i < frames; i++) {
+        if (left_out[i] != 0.0f || right_out[i] != 0.0f) {
             has_signal = true;
             break;
         }
@@ -295,8 +304,10 @@ void test_audio_processing() {
     }
 
     // Cleanup
-    delete[] input;
-    delete[] output;
+    delete[] left_in;
+    delete[] right_in;
+    delete[] left_out;
+    delete[] right_out;
     rack_au_plugin_free(plugin);
     delete[] plugins;
     rack_au_scanner_free(scanner);
@@ -586,21 +597,32 @@ void test_midi_operations() {
     }
     std::cout << "PASS: MIDI events sent successfully (C major chord)\n";
 
-    // Process audio to render the notes
+    // Process audio to render the notes (planar format)
     const uint32_t frames = 512;
-    float* input = new float[frames * 2];
-    float* output = new float[frames * 2];
+    const uint32_t num_channels = 2;
+    float* left_in = new float[frames];
+    float* right_in = new float[frames];
+    float* left_out = new float[frames];
+    float* right_out = new float[frames];
 
     // Clear buffers
-    memset(input, 0, frames * 2 * sizeof(float));
-    memset(output, 0, frames * 2 * sizeof(float));
+    memset(left_in, 0, frames * sizeof(float));
+    memset(right_in, 0, frames * sizeof(float));
+    memset(left_out, 0, frames * sizeof(float));
+    memset(right_out, 0, frames * sizeof(float));
+
+    // Create pointer arrays for planar API
+    const float* inputs[2] = { left_in, right_in };
+    float* outputs[2] = { left_out, right_out };
 
     // Process audio (instrument should generate sound from MIDI)
-    result = rack_au_plugin_process(plugin, input, output, frames);
+    result = rack_au_plugin_process(plugin, inputs, num_channels, outputs, num_channels, frames);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Audio processing failed after MIDI (error: " << result << ")\n";
-        delete[] input;
-        delete[] output;
+        delete[] left_in;
+        delete[] right_in;
+        delete[] left_out;
+        delete[] right_out;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -609,8 +631,8 @@ void test_midi_operations() {
 
     // Check if output contains audio signal (MIDI notes rendered)
     bool has_signal = false;
-    for (uint32_t i = 0; i < frames * 2; i++) {
-        if (output[i] != 0.0f) {
+    for (uint32_t i = 0; i < frames; i++) {
+        if (left_out[i] != 0.0f || right_out[i] != 0.0f) {
             has_signal = true;
             break;
         }
@@ -630,8 +652,10 @@ void test_midi_operations() {
     result = rack_au_plugin_send_midi(plugin, events, 3);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Failed to send Note Off events (error: " << result << ")\n";
-        delete[] input;
-        delete[] output;
+        delete[] left_in;
+        delete[] right_in;
+        delete[] left_out;
+        delete[] right_out;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -644,8 +668,10 @@ void test_midi_operations() {
     result = rack_au_plugin_send_midi(plugin, events, 1);
     if (result == RACK_AU_OK) {
         std::cerr << "FAIL: Should reject invalid MIDI channel\n";
-        delete[] input;
-        delete[] output;
+        delete[] left_in;
+        delete[] right_in;
+        delete[] left_out;
+        delete[] right_out;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -657,8 +683,10 @@ void test_midi_operations() {
     result = rack_au_plugin_send_midi(plugin, nullptr, 0);
     if (result != RACK_AU_OK) {
         std::cerr << "FAIL: Empty MIDI array should succeed\n";
-        delete[] input;
-        delete[] output;
+        delete[] left_in;
+        delete[] right_in;
+        delete[] left_out;
+        delete[] right_out;
         rack_au_plugin_free(plugin);
         delete[] plugins;
         rack_au_scanner_free(scanner);
@@ -667,8 +695,10 @@ void test_midi_operations() {
     std::cout << "PASS: Empty MIDI event array handled correctly\n";
 
     // Cleanup
-    delete[] input;
-    delete[] output;
+    delete[] left_in;
+    delete[] right_in;
+    delete[] left_out;
+    delete[] right_out;
     rack_au_plugin_free(plugin);
     delete[] plugins;
     rack_au_scanner_free(scanner);

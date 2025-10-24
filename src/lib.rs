@@ -20,10 +20,17 @@
 //! let mut plugin = scanner.load(&plugins[0])?;
 //! plugin.initialize(48000.0, 512)?;
 //!
-//! // Process audio with aligned buffers
-//! let input = AudioBuffer::new(512);
-//! let mut output = AudioBuffer::new(512);
-//! plugin.process(&input, &mut output)?;
+//! // Process audio (planar format - one buffer per channel)
+//! let left_in = vec![0.0f32; 512];
+//! let right_in = vec![0.0f32; 512];
+//! let mut left_out = vec![0.0f32; 512];
+//! let mut right_out = vec![0.0f32; 512];
+//!
+//! plugin.process(
+//!     &[&left_in, &right_in],
+//!     &mut [&mut left_out, &mut right_out],
+//!     512
+//! )?;
 //! # Ok(())
 //! # }
 //! ```
@@ -40,13 +47,11 @@
 //! Currently, AudioUnit hosting is only available on macOS.
 //! VST3 and CLAP support will be cross-platform.
 
-pub mod buffer;
 pub mod error;
 pub mod midi;
 pub mod plugin_info;
 pub mod traits;
 
-pub use buffer::AudioBuffer;
 pub use error::{Error, Result};
 pub use midi::{MidiEvent, MidiEventKind};
 pub use plugin_info::{ParameterInfo, PluginInfo, PluginType, PresetInfo};
@@ -63,7 +68,7 @@ pub use au::{AudioUnitGui, AudioUnitPlugin as Plugin, AudioUnitScanner as Scanne
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::{
-        AudioBuffer, Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance,
+        Error, MidiEvent, MidiEventKind, ParameterInfo, PluginInfo, PluginInstance,
         PluginScanner, PluginType, PresetInfo, Result,
     };
 

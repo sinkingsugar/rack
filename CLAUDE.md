@@ -90,7 +90,9 @@ See TODO.md for detailed phase breakdown and implementation status.
 
 **Examples of this principle:**
 - MIDI events use `SmallVec<[_; 16]>` for zero-allocation in typical cases
-- Audio buffers use `aligned-vec` for SIMD-optimized processing
+- Audio buffers use planar format with zero-copy pointer assignment (no memcpy in hot path)
+- AudioBufferList structures point directly at caller's buffers (eliminated 2 of 3 memcpy operations)
+- Pre-allocated pointer arrays reused across process() calls
 - Future: Consider object pools for large event batches
 
 ## Building
@@ -131,6 +133,12 @@ cmake --build . --target test
 - **Critical thread-safety fix**: Global mutex (`g_audio_unit_cleanup_mutex`) in `au_instance.cpp` serializes AudioUnit lifecycle operations (AudioComponentInstanceNew, AudioUnitInitialize, AudioUnitUninitialize, AudioComponentInstanceDispose) to prevent Apple AudioUnit framework race conditions
 - Init/deinit are cold paths (already allocate/do I/O), mutex overhead is negligible
 - AudioUnitRender stays lock-free (hot path unaffected)
+- **Zero-copy audio processing** (v0.3.0): Planar audio API with pointer assignment instead of memcpy
+  - AudioBufferList structures point directly at caller's buffers (eliminated 2 of 3 memcpy operations)
+  - Only remaining copy is in input_render_callback (unavoidable - AudioUnit provides the buffer)
+  - Pre-allocated pointer arrays (`Vec<*const f32>`, `Vec<*mut f32>`) reused across process() calls
+  - Dynamic channel count support (no hardcoded stereo limitations)
+  - **Validation in Rust layer**: All input validation happens in Rust (public API), C++ trusts validated inputs
 - Phase 6 (MIDI) uses SmallVec for zero-allocation performance
 - KISS principle guides all design decisions
 - **Performance over documentation**: Fix performance issues, don't just document them

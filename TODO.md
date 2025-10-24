@@ -67,19 +67,25 @@
 - [x] Performance: ~4x speedup from SIMD on both ARM and x86_64
 - [x] Memory safety: No leaks, proper cleanup paths
 - [x] All PR review issues addressed (alignment, thread safety, buffer validation)
+- [x] **Planar audio API refactor (v0.3.0)**: Non-interleaved format throughout
+- [x] **Zero-copy optimization**: AudioBufferList points directly at caller's buffers
+- [x] Eliminated 2 of 3 memcpy operations (only input_render_callback remains)
+- [x] Pre-allocated pointer arrays reused across process() calls
+- [x] Dynamic channel count support (removed hardcoded stereo limitations)
+- [x] Channel count validation moved to Rust layer (C++ trusts validated inputs)
+- [x] Comprehensive test coverage for channel mismatches and buffer length validation
 
-**Status**: Audio processing complete with production-ready SIMD optimizations. End-to-end aligned audio path from Rust → C++ → AudioUnit → C++ → Rust.
+**Status**: Audio processing complete with production-ready SIMD optimizations and zero-copy performance. Planar API with minimal memcpy overhead.
 
 **Key Files**:
-- `src/buffer.rs` - 16-byte aligned AudioBuffer using AVec
-- `rack-sys/src/au_instance.cpp` - SIMD processing with ARM NEON and x86_64 SSE2
+- `src/au/instance.rs` - Zero-copy process() with pre-allocated pointer arrays
+- `rack-sys/src/au_instance.cpp` - Zero-copy AudioBufferList + SIMD processing
 - `examples/process_audio.rs` - Complete audio processing demonstration
 
 **Test Results**:
-- 20/20 Rust tests passing
-- 4/4 C++ tests passing
-- 4/4 doctests passing
+- 53/53 Rust tests passing (includes channel validation and buffer length tests)
 - All examples working
+- Zero allocations in hot path (process() call)
 
 ---
 
