@@ -175,8 +175,13 @@ extern "C" {
     ///
     /// # Returns
     ///
-    /// - 0 on success
-    /// - Negative error code on failure
+    /// - `RACK_AU_OK` (0) on success
+    /// - `RACK_AU_ERROR_NOT_INITIALIZED` if plugin is not initialized
+    /// - `RACK_AU_ERROR_AUDIO_UNIT + OSStatus` if AudioUnitReset fails
+    ///
+    /// # Thread Safety
+    ///
+    /// Should be called from a non-realtime thread.
     ///
     /// # Safety
     ///

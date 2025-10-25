@@ -2082,6 +2082,22 @@ mod tests {
         plugin.process(&silent_input_refs, &mut silent_output_refs, 512)
             .expect("Failed to process audio after reset");
 
-        println!("✓ Reset successfully clears plugin state");
+        // Verify that reset actually cleared state by checking output
+        // After reset + processing silence, output should be very quiet (no residual state)
+        // We allow some small output (plugin might add noise or have DC offset)
+        let max_abs_value = silent_outputs.iter()
+            .flat_map(|ch| ch.iter())
+            .map(|&v| v.abs())
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+
+        // After processing silence through a reset plugin, output should be negligible
+        // Allow up to 0.1 for plugins that might have some DC offset or noise floor
+        assert!(max_abs_value < 0.1,
+                "After reset, processing silence should produce minimal output, got max: {}",
+                max_abs_value);
+
+        println!("✓ Reset successfully clears plugin state (verified: max output {:.6} after silence)",
+                 max_abs_value);
     }
 }

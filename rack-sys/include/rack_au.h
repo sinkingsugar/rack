@@ -88,7 +88,13 @@ int rack_au_plugin_is_initialized(RackAUPlugin* plugin);
 // Reset plugin state
 // Clears all internal buffers, delay lines, and state without changing parameters.
 // Useful for clearing reverb tails, delay lines, etc. between songs or after preset changes.
-// Returns 0 on success, negative error code on failure
+//
+// Returns:
+//   0 (RACK_AU_OK) on success
+//   RACK_AU_ERROR_NOT_INITIALIZED if plugin is not initialized
+//   RACK_AU_ERROR_AUDIO_UNIT + OSStatus if AudioUnitReset fails
+//
+// Thread-safety: Should be called from a non-realtime thread.
 int rack_au_plugin_reset(RackAUPlugin* plugin);
 
 // Get input channel count
