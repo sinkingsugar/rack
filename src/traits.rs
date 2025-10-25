@@ -16,9 +16,52 @@ pub trait PluginScanner {
 }
 
 /// Trait for an instantiated audio plugin
+///
+/// # Thread Safety
+///
+/// - All methods except `process()` should be called from **non-realtime threads**
+/// - `initialize()` and `Drop` are **globally serialized** (mutex protected) for AudioUnit safety
+/// - Other methods (reset, parameters, etc.) are safe but should not be called from audio thread
+/// - Only `process()` is designed for realtime/audio thread usage
 pub trait PluginInstance: Send {
     /// Initialize the plugin with the given sample rate and maximum block size
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is **globally serialized** across all plugin instances to work around
+    /// thread-safety issues in Apple's AudioUnit framework. Call from a non-realtime thread.
     fn initialize(&mut self, sample_rate: f64, max_block_size: usize) -> Result<()>;
+
+    /// Reset the plugin's internal state
+    ///
+    /// Clears all internal buffers, delay lines, and state without changing parameters.
+    /// Useful for:
+    /// - Clearing reverb/delay tails when stopping playback
+    /// - Resetting plugin state between songs
+    /// - Clearing artifacts after preset changes
+    ///
+    /// # Notes
+    ///
+    /// - Plugin must be initialized before calling reset
+    /// - Parameters are NOT reset (use set_parameter or load_preset for that)
+    /// - Sample rate and buffer size remain unchanged
+    ///
+    /// # Thread Safety
+    ///
+    /// Call from a **non-realtime thread**. This is a runtime state operation (not globally serialized).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example(mut plugin: impl PluginInstance) -> Result<()> {
+    /// plugin.initialize(48000.0, 512)?;
+    /// // ... process audio ...
+    /// plugin.reset()?; // Clear reverb tail, delay lines, etc.
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn reset(&mut self) -> Result<()>;
 
     /// Process audio through the plugin
     ///

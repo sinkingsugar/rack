@@ -168,6 +168,27 @@ extern "C" {
     /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     pub fn rack_au_plugin_is_initialized(plugin: *mut RackAUPlugin) -> c_int;
 
+    /// Reset plugin state
+    ///
+    /// Clears all internal buffers, delay lines, and state without changing parameters.
+    /// Useful for clearing reverb tails, delay lines, etc. between songs or after preset changes.
+    ///
+    /// # Returns
+    ///
+    /// - `RACK_AU_OK` (0) on success
+    /// - `RACK_AU_ERROR_NOT_INITIALIZED` if plugin is not initialized
+    /// - `RACK_AU_ERROR_AUDIO_UNIT + OSStatus` if AudioUnitReset fails
+    ///
+    /// # Thread Safety
+    ///
+    /// Should be called from a non-realtime thread.
+    ///
+    /// # Safety
+    ///
+    /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
+    /// - Plugin must be initialized (returns error if not)
+    pub fn rack_au_plugin_reset(plugin: *mut RackAUPlugin) -> c_int;
+
     /// Get input channel count
     ///
     /// # Returns

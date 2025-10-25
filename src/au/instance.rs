@@ -103,6 +103,18 @@ impl PluginInstance for AudioUnitPlugin {
         }
     }
 
+    fn reset(&mut self) -> Result<()> {
+        unsafe {
+            let result = ffi::rack_au_plugin_reset(self.inner.as_ptr());
+
+            if result != ffi::RACK_AU_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
+        }
+    }
+
     fn process(
         &mut self,
         inputs: &[&[f32]],
@@ -1990,5 +2002,102 @@ mod tests {
         }
 
         println!("✓ Correctly rejected mismatched buffer lengths (channel 1: 256 < 512 frames)");
+    }
+
+    // Reset Tests
+
+    #[test]
+    fn test_reset_before_init() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+
+        // Try to reset before initialization
+        let result = plugin.reset();
+        assert!(result.is_err(), "reset() should fail before initialization");
+
+        println!("✓ Reset correctly fails before initialization");
+    }
+
+    #[test]
+    fn test_reset_after_init() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        // Reset should succeed after initialization
+        let result = plugin.reset();
+        assert!(result.is_ok(), "reset() should succeed after initialization");
+
+        println!("✓ Reset succeeds after initialization");
+    }
+
+    #[test]
+    fn test_reset_clears_state() {
+        let Some(info) = get_test_plugin() else {
+            println!("No test plugins available, skipping test");
+            return;
+        };
+
+        let mut plugin = AudioUnitPlugin::new(&info).expect("Failed to create plugin");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Failed to initialize plugin");
+
+        let input_ch = plugin.input_channels();
+        let output_ch = plugin.output_channels();
+
+        // Process some audio to build up state (delay lines, reverb, etc.)
+        let inputs: Vec<Vec<f32>> = (0..input_ch).map(|_| vec![1.0f32; 512]).collect();
+        let mut outputs: Vec<Vec<f32>> = (0..output_ch).map(|_| vec![0.0f32; 512]).collect();
+
+        let input_refs: Vec<&[f32]> = inputs.iter().map(|v| v.as_slice()).collect();
+        let mut output_refs: Vec<&mut [f32]> = outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        // Process several buffers to build up internal state
+        for _ in 0..10 {
+            plugin.process(&input_refs, &mut output_refs, 512)
+                .expect("Failed to process audio");
+        }
+
+        // Reset should clear all internal state
+        plugin.reset().expect("Failed to reset plugin");
+
+        // Process silence after reset
+        let silent_inputs: Vec<Vec<f32>> = (0..input_ch).map(|_| vec![0.0f32; 512]).collect();
+        let mut silent_outputs: Vec<Vec<f32>> = (0..output_ch).map(|_| vec![0.0f32; 512]).collect();
+
+        let silent_input_refs: Vec<&[f32]> = silent_inputs.iter().map(|v| v.as_slice()).collect();
+        let mut silent_output_refs: Vec<&mut [f32]> = silent_outputs.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        plugin.process(&silent_input_refs, &mut silent_output_refs, 512)
+            .expect("Failed to process audio after reset");
+
+        // Verify that reset actually cleared state by checking output
+        // After reset + processing silence, output should be very quiet (no residual state)
+        // We allow some small output (plugin might add noise or have DC offset)
+        let max_abs_value = silent_outputs.iter()
+            .flat_map(|ch| ch.iter())
+            .map(|&v| v.abs())
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+
+        // After processing silence through a reset plugin, output should be negligible
+        // Allow up to 0.1 for plugins that might have some DC offset or noise floor
+        assert!(max_abs_value < 0.1,
+                "After reset, processing silence should produce minimal output, got max: {}",
+                max_abs_value);
+
+        println!("✓ Reset successfully clears plugin state (verified: max output {:.6} after silence)",
+                 max_abs_value);
     }
 }
