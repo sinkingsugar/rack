@@ -7,8 +7,10 @@
 #include <new>     // for std::align_val_t
 #include <mutex>
 
-// Global mutex to serialize AudioUnit cleanup operations
-// AudioUnitUninitialize/AudioComponentInstanceDispose are not fully thread-safe
+// Global mutex to serialize AudioUnit LIFECYCLE operations only
+// Protects: AudioComponentInstanceNew, AudioUnitInitialize, AudioUnitUninitialize, AudioComponentInstanceDispose
+// NOT for runtime operations: AudioUnitReset, AudioUnitSetParameter, AudioUnitRender, etc.
+// Rationale: Apple's framework has race conditions in instance management, not in runtime state operations
 static std::mutex g_audio_unit_cleanup_mutex;
 
 // Internal plugin state
@@ -482,6 +484,10 @@ int rack_au_plugin_reset(RackAUPlugin* plugin) {
     }
 
     // Call AudioUnitReset to clear all internal state
+    // NOTE: No mutex protection - reset is a RUNTIME operation (clears buffers/state),
+    // not a lifecycle operation (instance creation/disposal). The global mutex only
+    // protects lifecycle operations that touch Apple's instance management internals.
+    // Reset is comparable to AudioUnitSetParameter, not AudioUnitInitialize.
     OSStatus status = AudioUnitReset(plugin->audio_unit, kAudioUnitScope_Global, 0);
 
     if (status != noErr) {

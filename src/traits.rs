@@ -16,8 +16,20 @@ pub trait PluginScanner {
 }
 
 /// Trait for an instantiated audio plugin
+///
+/// # Thread Safety
+///
+/// - All methods except `process()` should be called from **non-realtime threads**
+/// - `initialize()` and `Drop` are **globally serialized** (mutex protected) for AudioUnit safety
+/// - Other methods (reset, parameters, etc.) are safe but should not be called from audio thread
+/// - Only `process()` is designed for realtime/audio thread usage
 pub trait PluginInstance: Send {
     /// Initialize the plugin with the given sample rate and maximum block size
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is **globally serialized** across all plugin instances to work around
+    /// thread-safety issues in Apple's AudioUnit framework. Call from a non-realtime thread.
     fn initialize(&mut self, sample_rate: f64, max_block_size: usize) -> Result<()>;
 
     /// Reset the plugin's internal state
@@ -33,6 +45,10 @@ pub trait PluginInstance: Send {
     /// - Plugin must be initialized before calling reset
     /// - Parameters are NOT reset (use set_parameter or load_preset for that)
     /// - Sample rate and buffer size remain unchanged
+    ///
+    /// # Thread Safety
+    ///
+    /// Call from a **non-realtime thread**. This is a runtime state operation (not globally serialized).
     ///
     /// # Examples
     ///
