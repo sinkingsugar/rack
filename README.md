@@ -30,7 +30,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rack = "0.2"
+rack = "0.3"
 ```
 
 ### List available plugins
@@ -162,7 +162,8 @@ pub trait PluginScanner {
 
 pub trait PluginInstance: Send {
     fn initialize(&mut self, sample_rate: f64, max_block_size: usize) -> Result<()>;
-    fn process(&mut self, input: &[f32], output: &mut [f32]) -> Result<()>;
+    fn reset(&mut self) -> Result<()>;
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_frames: usize) -> Result<()>;
     fn get_parameter(&self, index: usize) -> Result<f32>;
     fn set_parameter(&mut self, index: usize, value: f32) -> Result<()>;
     // ... more methods
@@ -179,6 +180,7 @@ This allows different plugin formats to implement the same interface, making you
 - [x] Audio processing with SIMD optimization (ARM NEON + x86_64 SSE2)
 - [x] Zero-copy planar audio API (eliminated 2 of 3 memcpy operations)
 - [x] Dynamic channel count support (mono/stereo/surround)
+- [x] Plugin state reset (clear buffers/delay lines)
 - [x] Parameter control with caching
 - [x] MIDI support (zero-allocation, all MIDI 1.0 messages)
 - [x] Preset management (factory presets + state serialization)
@@ -223,7 +225,7 @@ at your option.
 ## Acknowledgments
 
 - Inspired by [VCV Rack](https://vcvrack.com/) and the modular synthesis community
-- Built on top of [coreaudio-rs](https://github.com/RustAudio/coreaudio-rs)
+- AudioUnit implementation uses Apple's AudioToolbox framework directly via C++ FFI
 - Thanks to the Rust audio community at [rust.audio](https://rust.audio)
 
 ## Why "Rack"?
