@@ -476,6 +476,21 @@ int rack_au_plugin_is_initialized(RackAUPlugin* plugin) {
     return plugin && plugin->initialized ? 1 : 0;
 }
 
+int rack_au_plugin_reset(RackAUPlugin* plugin) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_AU_ERROR_NOT_INITIALIZED;
+    }
+
+    // Call AudioUnitReset to clear all internal state
+    OSStatus status = AudioUnitReset(plugin->audio_unit, kAudioUnitScope_Global, 0);
+
+    if (status != noErr) {
+        return RACK_AU_ERROR_AUDIO_UNIT + status;
+    }
+
+    return RACK_AU_OK;
+}
+
 int rack_au_plugin_process(
     RackAUPlugin* plugin,
     const float* const* inputs,

@@ -85,6 +85,12 @@ int rack_au_plugin_initialize(RackAUPlugin* plugin, double sample_rate, uint32_t
 // Check if plugin is initialized
 int rack_au_plugin_is_initialized(RackAUPlugin* plugin);
 
+// Reset plugin state
+// Clears all internal buffers, delay lines, and state without changing parameters.
+// Useful for clearing reverb tails, delay lines, etc. between songs or after preset changes.
+// Returns 0 on success, negative error code on failure
+int rack_au_plugin_reset(RackAUPlugin* plugin);
+
 // Get input channel count
 // Returns number of input channels, or 0 if not initialized or query failed
 // Thread-safety: Should be called after initialize()

@@ -20,6 +20,33 @@ pub trait PluginInstance: Send {
     /// Initialize the plugin with the given sample rate and maximum block size
     fn initialize(&mut self, sample_rate: f64, max_block_size: usize) -> Result<()>;
 
+    /// Reset the plugin's internal state
+    ///
+    /// Clears all internal buffers, delay lines, and state without changing parameters.
+    /// Useful for:
+    /// - Clearing reverb/delay tails when stopping playback
+    /// - Resetting plugin state between songs
+    /// - Clearing artifacts after preset changes
+    ///
+    /// # Notes
+    ///
+    /// - Plugin must be initialized before calling reset
+    /// - Parameters are NOT reset (use set_parameter or load_preset for that)
+    /// - Sample rate and buffer size remain unchanged
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rack::prelude::*;
+    /// # fn example(mut plugin: impl PluginInstance) -> Result<()> {
+    /// plugin.initialize(48000.0, 512)?;
+    /// // ... process audio ...
+    /// plugin.reset()?; // Clear reverb tail, delay lines, etc.
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn reset(&mut self) -> Result<()>;
+
     /// Process audio through the plugin
     ///
     /// Uses planar (non-interleaved) audio format - each channel is a separate buffer.
