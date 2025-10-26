@@ -1,4 +1,5 @@
 #include "rack_au.h"
+#include <TargetConditionals.h>  // Required for TARGET_OS_* macros
 
 // This file contains platform-specific implementations
 // Scanner and instance implementations are in au_scanner.cpp and au_instance.cpp

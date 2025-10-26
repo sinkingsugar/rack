@@ -7,8 +7,8 @@ fn main() {
         // Build rack-sys with CMake using explicit configuration
         let target = env::var("TARGET").unwrap();
 
-        // Detect iOS vs macOS
-        let is_ios = target.contains("ios");
+        // Detect iOS/visionOS vs macOS (UIKit vs AppKit)
+        let is_ios_family = target.contains("ios") || target.contains("vision");
 
         // Check if ASAN should be enabled
         let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
@@ -51,9 +51,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=CoreAudioKit");
 
         // Link platform-specific UI frameworks
-        if is_ios {
+        if is_ios_family {
             println!("cargo:rustc-link-lib=framework=UIKit");
-            eprintln!("Building rack-sys for iOS (GUI disabled)");
+            eprintln!("Building rack-sys for iOS/visionOS (GUI provided by app extensions)");
         } else {
             println!("cargo:rustc-link-lib=framework=AppKit");
             eprintln!("Building rack-sys for macOS (GUI enabled)");
