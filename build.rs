@@ -1,11 +1,14 @@
 fn main() {
-    // Only build C++ wrapper on macOS
-    #[cfg(target_os = "macos")]
+    // Build C++ wrapper on Apple platforms (macOS and iOS)
+    #[cfg(target_vendor = "apple")]
     {
         use std::env;
 
         // Build rack-sys with CMake using explicit configuration
         let target = env::var("TARGET").unwrap();
+
+        // Detect iOS vs macOS
+        let is_ios = target.contains("ios");
 
         // Check if ASAN should be enabled
         let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
@@ -30,7 +33,7 @@ fn main() {
         println!("cargo:rustc-link-lib=static={}", lib_name);
 
         // Link C++ standard library (required for C++ code)
-        // Use libc++ on macOS (default for clang)
+        // Use libc++ on Apple platforms (default for clang)
         println!("cargo:rustc-link-lib=c++");
 
         // Link ASAN runtime if enabled
@@ -41,12 +44,20 @@ fn main() {
             println!("cargo:rustc-link-arg=-fno-omit-frame-pointer");
         }
 
-        // Link required macOS frameworks for AudioUnit API
+        // Link required frameworks for AudioUnit API (common to macOS and iOS)
         println!("cargo:rustc-link-lib=framework=AudioToolbox");
         println!("cargo:rustc-link-lib=framework=CoreAudio");
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
         println!("cargo:rustc-link-lib=framework=CoreAudioKit");
-        println!("cargo:rustc-link-lib=framework=AppKit");
+
+        // Link platform-specific UI frameworks
+        if is_ios {
+            println!("cargo:rustc-link-lib=framework=UIKit");
+            eprintln!("Building rack-sys for iOS (GUI disabled)");
+        } else {
+            println!("cargo:rustc-link-lib=framework=AppKit");
+            eprintln!("Building rack-sys for macOS (GUI enabled)");
+        }
 
         // Rerun build script if C++ sources, headers, or build config changes
         println!("cargo:rerun-if-changed=rack-sys/src");

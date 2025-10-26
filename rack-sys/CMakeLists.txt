@@ -5,31 +5,50 @@ project(rack_sys VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Build as static library for easy linking with Rust
-add_library(rack_sys STATIC
+# Source files common to all Apple platforms
+set(RACK_SYS_SOURCES
     src/rack_au.cpp
     src/au_scanner.cpp
     src/au_instance.cpp
-    src/au_gui.mm
 )
+
+# Add GUI sources only on macOS (requires AppKit)
+# iOS and visionOS don't have AppKit
+if(NOT CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
+    list(APPEND RACK_SYS_SOURCES src/au_gui.mm)
+endif()
+
+# Build as static library for easy linking with Rust
+add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
 
 # Public headers
 target_include_directories(rack_sys PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# macOS-specific settings
+# Apple platform-specific settings
 if(APPLE)
-    # Link required frameworks
+    # Link required frameworks (common to macOS and iOS)
     target_link_libraries(rack_sys PUBLIC
         "-framework AudioToolbox"
         "-framework CoreAudio"
         "-framework CoreFoundation"
         "-framework CoreAudioKit"
-        "-framework AppKit"
     )
 
-    # Enable ARC (Automatic Reference Counting) for Objective-C++ (required for au_gui.mm)
+    # Platform-specific UI frameworks
+    if(CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
+        # iOS/visionOS: GUI provided by app extensions (UIKit would go here if needed)
+        # target_link_libraries(rack_sys PUBLIC "-framework UIKit")
+        message(STATUS "Building for ${CMAKE_SYSTEM_NAME} - GUI disabled (provided by app extensions)")
+    else()
+        # macOS: Link AppKit for GUI support
+        target_link_libraries(rack_sys PUBLIC "-framework AppKit")
+        message(STATUS "Building for macOS - GUI enabled")
+    endif()
+
+    # Enable ARC (Automatic Reference Counting) for Objective-C++
+    # Required for au_gui.mm on macOS
     target_compile_options(rack_sys PRIVATE -fobjc-arc)
 endif()
 
