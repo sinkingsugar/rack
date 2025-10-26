@@ -37,14 +37,16 @@
 //!
 //! ## Features
 //!
-//! - **AudioUnit support** (macOS) - built-in
+//! - **AudioUnit support** (macOS, iOS) - built-in
 //! - **VST3 support** - coming soon
 //! - **CLAP support** - coming soon
 //! - **cpal integration** - optional, enable with `cpal` feature
 //!
 //! ## Platform Support
 //!
-//! Currently, AudioUnit hosting is only available on macOS.
+//! AudioUnit hosting is available on macOS and iOS.
+//! - macOS: Full support including GUI
+//! - iOS: Core functionality (no GUI yet)
 //! VST3 and CLAP support will be cross-platform.
 
 pub mod error;
@@ -58,11 +60,12 @@ pub use plugin_info::{ParameterInfo, PluginInfo, PluginType, PresetInfo};
 pub use traits::{PluginInstance, PluginScanner};
 
 // Platform-specific implementations
-#[cfg(target_os = "macos")]
+// AudioUnit is available on both macOS and iOS
+#[cfg(target_vendor = "apple")]
 pub mod au;
 
 // Re-export the default scanner and plugin types for the platform
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 pub use au::{AudioUnitGui, AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
 
 /// Prelude module for convenient imports
@@ -72,6 +75,6 @@ pub mod prelude {
         PluginScanner, PluginType, PresetInfo, Result,
     };
 
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub use crate::{AudioUnitGui, Plugin, Scanner};
 }

@@ -125,3 +125,43 @@ jobs:
           exit 1
         fi
         echo "✓ simple_synth example completed successfully"
+
+  check-ios:
+    name: Check iOS build
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        target: aarch64-apple-ios
+
+    - name: Check iOS build
+      run: |
+        echo "Checking iOS build..."
+        cargo check --target aarch64-apple-ios --verbose
+        echo "✓ iOS build check successful"
+
+  check-visionos:
+    name: Check visionOS build
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust nightly
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: nightly
+        components: rust-src
+
+    - name: Check visionOS build
+      run: |
+        echo "Checking visionOS build..."
+        cargo +nightly check --target aarch64-apple-visionos -Zbuild-std=std,panic_abort --verbose
+        echo "✓ visionOS build check successful"

@@ -3,7 +3,7 @@
 **A modern Rust library for hosting audio plugins**
 
 > **Status:** AudioUnit support is **production-ready** on macOS (Phases 1-8 complete).
-> The API is stabilizing. Other plugin formats (VST3, CLAP) are planned.
+> iOS and visionOS are supported (untested). The API is stabilizing. Other plugin formats (VST3, CLAP) are planned.
 
 [![Crates.io](https://img.shields.io/crates/v/rack.svg)](https://crates.io/crates/rack)
 [![Documentation](https://docs.rs/rack/badge.svg)](https://docs.rs/rack)
@@ -13,7 +13,7 @@ Rack is a cross-platform library for discovering, loading, and processing audio 
 
 ## Features
 
-- ✅ **AudioUnit support** (macOS) - complete with scanning, loading, processing, parameters, MIDI, presets, and GUI
+- ✅ **AudioUnit support** (macOS, iOS, visionOS) - complete with scanning, loading, processing, parameters, MIDI, presets, and GUI
 - ⚡ **Zero-copy audio processing** - planar format with pointer assignment (eliminated 2 of 3 memcpy operations)
 - 🎵 **SIMD-optimized** - ARM NEON and x86_64 SSE2 for 4x performance
 - 🎹 **Zero-allocation MIDI** - SmallVec-based MIDI for real-time performance
@@ -85,15 +85,22 @@ See [examples/simple_synth.rs](examples/simple_synth.rs) for a complete MIDI syn
 
 ## Platform Support
 
-| Platform | AudioUnit | VST3 | CLAP | LV2 |
-|----------|-----------|------|------|-----|
-| macOS    | ✅        | 🚧   | 🚧   | ❌  |
-| Windows  | ❌        | 🚧   | 🚧   | ❌  |
-| Linux    | ❌        | 🚧   | 🚧   | 🚧  |
+| Platform | AudioUnit | VST3 | CLAP | LV2 | Notes |
+|----------|-----------|------|------|-----|-------|
+| macOS    | ✅        | 🚧   | 🚧   | ❌  | Production-ready |
+| iOS      | ✅        | ❌   | ❌   | ❌  | Untested |
+| visionOS | ✅        | ❌   | ❌   | ❌  | Untested |
+| Windows  | ❌        | 🚧   | 🚧   | ❌  | |
+| Linux    | ❌        | 🚧   | 🚧   | 🚧  | |
 
 - ✅ Supported
 - 🚧 Planned
 - ❌ Not applicable
+
+**Apple Platform Notes:**
+- Discovers and loads AUv3 app extensions (iOS/visionOS) or AudioUnit plugins (macOS)
+- Full audio processing, parameters, MIDI, and presets support
+- GUI support: macOS uses AppKit (AUv3/AUv2/generic UI), iOS/visionOS use app extension GUIs
 
 ## Examples
 
