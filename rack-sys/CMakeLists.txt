@@ -5,18 +5,50 @@ project(rack_sys VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Source files common to all Apple platforms
-set(RACK_SYS_SOURCES
-    src/rack_au.cpp
-    src/au_scanner.cpp
-    src/au_instance.cpp
+# AudioUnit source files (Apple platforms only)
+set(RACK_AU_SOURCES)
+if(APPLE)
+    set(RACK_AU_SOURCES
+        src/rack_au.cpp
+        src/au_scanner.cpp
+        src/au_instance.cpp
+    )
+    # Add GUI sources only on macOS (requires AppKit)
+    # iOS and visionOS don't have AppKit
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
+        list(APPEND RACK_AU_SOURCES src/au_gui.mm)
+    endif()
+endif()
+
+# VST3 source files (cross-platform)
+set(RACK_VST3_SOURCES
+    src/vst3_scanner.cpp
+    src/vst3_instance.cpp
 )
 
-# Add GUI sources only on macOS (requires AppKit)
-# iOS and visionOS don't have AppKit
-if(NOT CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
-    list(APPEND RACK_SYS_SOURCES src/au_gui.mm)
+# VST3 SDK hosting sources
+set(VST3_SDK_SOURCES
+    external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/hostclasses.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/processdata.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/parameterchanges.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/eventlist.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/connectionproxy.cpp
+    external/vst3sdk/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+)
+
+# Platform-specific VST3 module loading
+if(APPLE)
+    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_mac.mm)
+elseif(WIN32)
+    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_win32.cpp)
+else()
+    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_linux.cpp)
 endif()
+
+# Combine all sources
+set(RACK_SYS_SOURCES ${RACK_AU_SOURCES} ${RACK_VST3_SOURCES} ${VST3_SDK_SOURCES})
 
 # Build as static library for easy linking with Rust
 add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
@@ -24,6 +56,7 @@ add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
 # Public headers
 target_include_directories(rack_sys PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk
 )
 
 # Apple platform-specific settings
@@ -50,6 +83,11 @@ if(APPLE)
     # Enable ARC (Automatic Reference Counting) for Objective-C++
     # Required for au_gui.mm on macOS
     target_compile_options(rack_sys PRIVATE -fobjc-arc)
+endif()
+
+# Linux platform-specific settings (for VST3)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(rack_sys PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 # Compiler warnings

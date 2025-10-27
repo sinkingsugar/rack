@@ -5,6 +5,9 @@ Cargo.lock
 # CMake build artifacts
 rack-sys/build/
 
+# VST3 SDK (should be cloned separately)
+rack-sys/external/vst3sdk/
+
 # macOS
 .DS_Store
 
