@@ -13,7 +13,8 @@ on:
 jobs:
   claude-review:
     if: |
-      github.event.pull_request.user.login == 'sinkingsugar'
+      github.event.pull_request.user.login == 'sinkingsugar' &&
+      contains(github.event.pull_request.labels.*.name, 'claude-review')
 
     runs-on: ubuntu-latest
     permissions:
