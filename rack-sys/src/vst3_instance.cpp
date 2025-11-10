@@ -24,6 +24,55 @@ using namespace Steinberg::Vst;
 // VST3 module loading/unloading is not guaranteed to be thread-safe
 static std::mutex g_vst3_lifecycle_mutex;
 
+// Helper: Convert UTF-16 to UTF-8
+// VST3 uses char16 (UTF-16) for strings
+static std::string utf16_to_utf8(const char16* utf16_str) {
+    if (!utf16_str) {
+        return "";
+    }
+
+    std::string result;
+    result.reserve(128); // Reserve reasonable space
+
+    while (*utf16_str) {
+        char16 c = *utf16_str++;
+
+        // Handle UTF-16 to UTF-8 conversion
+        if (c < 0x80) {
+            // ASCII - 1 byte
+            result.push_back(static_cast<char>(c));
+        } else if (c < 0x800) {
+            // 2 bytes
+            result.push_back(static_cast<char>(0xC0 | (c >> 6)));
+            result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c >= 0xD800 && c <= 0xDBFF) {
+            // High surrogate - need to read low surrogate
+            if (*utf16_str >= 0xDC00 && *utf16_str <= 0xDFFF) {
+                // Valid surrogate pair
+                uint32_t codepoint = 0x10000 + ((c & 0x3FF) << 10) + (*utf16_str++ & 0x3FF);
+                // 4 bytes
+                result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+                result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+                result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+            } else {
+                // Invalid surrogate pair - replace with replacement character
+                result.push_back('?');
+            }
+        } else if (c >= 0xDC00 && c <= 0xDFFF) {
+            // Low surrogate without high surrogate - invalid
+            result.push_back('?');
+        } else {
+            // 3 bytes
+            result.push_back(static_cast<char>(0xE0 | (c >> 12)));
+            result.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+    }
+
+    return result;
+}
+
 // Helper: Convert hex string to UID
 static bool string_to_uid(const char* str, VST3::UID& uid) {
     if (!str) {
@@ -258,6 +307,9 @@ int rack_vst3_plugin_initialize(RackVST3Plugin* plugin, double sample_rate, uint
         return RACK_VST3_ERROR_GENERIC;
     }
 
+    // Prepare process_data once during initialization (not in hot path)
+    plugin->process_data.prepare(*plugin->component, max_block_size, kSample32);
+
     // Build parameter cache
     if (plugin->controller) {
         int32 param_count = plugin->controller->getParameterCount();
@@ -270,18 +322,9 @@ int rack_vst3_plugin_initialize(RackVST3Plugin* plugin, double sample_rate, uint
                 RackVST3Plugin::ParameterInfo info;
                 info.id = vst3_param_info.id;
 
-                // Convert UTF-16 to UTF-8 (simplified - just take ASCII part)
-                char title[256] = {0};
-                for (int j = 0; j < 127 && vst3_param_info.title[j]; ++j) {
-                    title[j] = static_cast<char>(vst3_param_info.title[j]);
-                }
-                info.title = title;
-
-                char units[128] = {0};
-                for (int j = 0; j < 127 && vst3_param_info.units[j]; ++j) {
-                    units[j] = static_cast<char>(vst3_param_info.units[j]);
-                }
-                info.units = units;
+                // Convert UTF-16 to UTF-8 (proper conversion for international characters)
+                info.title = utf16_to_utf8(vst3_param_info.title);
+                info.units = utf16_to_utf8(vst3_param_info.units);
 
                 // VST3 parameters are already normalized 0.0-1.0
                 info.min_value = 0.0;
@@ -344,8 +387,8 @@ int rack_vst3_plugin_process(
         return RACK_VST3_ERROR_NOT_INITIALIZED;
     }
 
-    // Set up audio buffers (planar format - VST3 native)
-    plugin->process_data.prepare(*plugin->component, frames, kSample32);
+    // Update dynamic fields only (prepare() was called during initialization)
+    plugin->process_data.numSamples = frames;
 
     // Set input buffers
     if (num_input_channels > 0 && inputs) {
@@ -361,7 +404,7 @@ int rack_vst3_plugin_process(
         bus.channelBuffers32 = const_cast<float**>(outputs);
     }
 
-    plugin->process_data.numSamples = frames;
+    // Set parameter and event interfaces
     plugin->process_data.inputParameterChanges = &plugin->input_param_changes;
     plugin->process_data.outputParameterChanges = &plugin->output_param_changes;
     plugin->process_data.inputEvents = &plugin->input_events;
@@ -370,9 +413,11 @@ int rack_vst3_plugin_process(
     // Process
     tresult result = plugin->processor->process(plugin->process_data);
 
-    // Clear events for next call
+    // Clear input/output events and parameter changes for next call
     plugin->input_events.clear();
     plugin->input_param_changes.clearQueue();
+    plugin->output_events.clear();
+    plugin->output_param_changes.clearQueue();
 
     return (result == kResultOk) ? RACK_VST3_OK : RACK_VST3_ERROR_GENERIC;
 }
@@ -542,7 +587,7 @@ int rack_vst3_plugin_send_midi(
                 vst3_event.type = Event::kNoteOnEvent;
                 vst3_event.noteOn.channel = midi_event.channel;
                 vst3_event.noteOn.pitch = midi_event.data1;
-                vst3_event.noteOn.velocity = midi_event.data2 / 127.0f;
+                vst3_event.noteOn.velocity = static_cast<float>(midi_event.data2) / 127.0f;
                 vst3_event.noteOn.noteId = -1;  // Not specified
                 break;
 
@@ -550,7 +595,7 @@ int rack_vst3_plugin_send_midi(
                 vst3_event.type = Event::kNoteOffEvent;
                 vst3_event.noteOff.channel = midi_event.channel;
                 vst3_event.noteOff.pitch = midi_event.data1;
-                vst3_event.noteOff.velocity = midi_event.data2 / 127.0f;
+                vst3_event.noteOff.velocity = static_cast<float>(midi_event.data2) / 127.0f;
                 vst3_event.noteOff.noteId = -1;  // Not specified
                 break;
 
