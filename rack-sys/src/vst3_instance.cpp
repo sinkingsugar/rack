@@ -709,8 +709,8 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
     // Try to get preset data using IProgramListData
     IPtr<IProgramListData> program_data = U::cast<IProgramListData>(unit_info);
     if (program_data) {
-        // Create stream to receive preset data
-        MemoryStream* stream = new MemoryStream();
+        // Create stream to receive preset data (IPtr provides RAII cleanup)
+        IPtr<MemoryStream> stream(new MemoryStream(), false);
 
         // Get program data
         tresult result = program_data->getProgramData(preset.program_list_id, preset.program_index, stream);
@@ -718,13 +718,12 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
             // Reset stream and apply the preset data
             stream->seek(0, IBStream::kIBSeekSet, nullptr);
             result = program_data->setProgramData(preset.program_list_id, preset.program_index, stream);
-            delete stream;
 
             if (result == kResultOk) {
                 return RACK_VST3_OK;
             }
         }
-        delete stream;
+        // IPtr automatically releases stream on scope exit
     }
 
     // Fallback: Some plugins don't support IProgramListData
@@ -748,13 +747,12 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
-    // Create memory stream for component state
-    MemoryStream* stream = new MemoryStream();
+    // Create memory stream for component state (IPtr provides RAII cleanup)
+    IPtr<MemoryStream> stream(new MemoryStream(), false);
 
     // Get component state
     tresult result = plugin->component->getState(stream);
     if (result != kResultOk) {
-        delete stream;
         return RACK_VST3_ERROR_GENERIC;
     }
 
@@ -762,7 +760,6 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
         result = plugin->controller->getState(stream);
         if (result != kResultOk) {
-            delete stream;
             return RACK_VST3_ERROR_GENERIC;
         }
     }
@@ -770,14 +767,13 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
     // Copy to output buffer
     size_t state_size = stream->getSize();
     if (state_size > *size) {
-        delete stream;
         *size = state_size;  // Return required size
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
     memcpy(data, stream->getData().data(), state_size);
     *size = state_size;
-    delete stream;
+    // IPtr automatically releases stream on scope exit
 
     return RACK_VST3_OK;
 }
@@ -787,13 +783,12 @@ int rack_vst3_plugin_set_state(RackVST3Plugin* plugin, const uint8_t* data, size
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
-    // Create memory stream from data
-    MemoryStream* stream = new MemoryStream(data, size);
+    // Create memory stream from data (IPtr provides RAII cleanup)
+    IPtr<MemoryStream> stream(new MemoryStream(data, size), false);
 
     // Set component state
     tresult result = plugin->component->setState(stream);
     if (result != kResultOk) {
-        delete stream;
         return RACK_VST3_ERROR_GENERIC;
     }
 
@@ -804,12 +799,11 @@ int rack_vst3_plugin_set_state(RackVST3Plugin* plugin, const uint8_t* data, size
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
         result = plugin->controller->setState(stream);
         if (result != kResultOk) {
-            delete stream;
             return RACK_VST3_ERROR_GENERIC;
         }
     }
 
-    delete stream;
+    // IPtr automatically releases stream on scope exit
     return RACK_VST3_OK;
 }
 
