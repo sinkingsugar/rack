@@ -486,14 +486,16 @@ int rack_vst3_plugin_is_initialized(RackVST3Plugin* plugin) {
 }
 
 int rack_vst3_plugin_reset(RackVST3Plugin* plugin) {
+    // Acquire mutex BEFORE checking state to prevent TOCTOU race condition
+    // Without this, another thread could change initialized between check and lock
+    std::lock_guard<std::mutex> lock(g_vst3_lifecycle_mutex);
+
     if (!plugin || !plugin->initialized || !plugin->component) {
         return RACK_VST3_ERROR_NOT_INITIALIZED;
     }
 
     // VST3 doesn't have a direct "reset" like AudioUnit
     // We can deactivate and reactivate the component
-    std::lock_guard<std::mutex> lock(g_vst3_lifecycle_mutex);
-
     plugin->component->setActive(false);
     if (plugin->component->setActive(true) != kResultOk) {
         return RACK_VST3_ERROR_GENERIC;
@@ -613,13 +615,19 @@ int rack_vst3_plugin_set_parameter(RackVST3Plugin* plugin, uint32_t index, float
     }
 
     ParamID param_id = plugin->parameters[index].id;
+
+    // Set parameter value on controller
     plugin->controller->setParamNormalized(param_id, value);
 
-    // Notify component of parameter change
-    if (plugin->component_cp) {
-        // In a full implementation, we'd send a message through the connection point
-        // For now, the parameter change will be picked up in the next process() call
-    }
+    // Note: For proper component notification, parameter changes should ideally be
+    // communicated through IComponentHandler or via inputParameterChanges during process().
+    // Since we don't have a full IComponentHandler implementation yet, the parameter
+    // change will be reflected in the next process() call when the component queries
+    // the controller for current parameter values.
+    //
+    // For realtime parameter automation, consider queuing changes via:
+    //   plugin->input_param_changes.addParameterData(param_id, ...)
+    // and communicating them during the next process() call.
 
     return RACK_VST3_OK;
 }
@@ -767,7 +775,7 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
-    // Create memory stream for component state
+    // Create memory stream for state serialization
     // IPtr ensures automatic cleanup on ALL code paths (success, error, buffer size check failure)
     IPtr<MemoryStream> stream(new MemoryStream(), false);
 
@@ -776,6 +784,14 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
     if (result != kResultOk) {
         return RACK_VST3_ERROR_GENERIC;
     }
+
+    // Record component state size for proper deserialization later
+    int64 component_state_size = 0;
+    stream->tell(&component_state_size);
+
+    // Write component state size as a marker (uint32_t)
+    uint32_t size_marker = static_cast<uint32_t>(component_state_size);
+    stream->write(&size_marker, sizeof(size_marker), nullptr);
 
     // Get controller state if separate controller
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
@@ -810,20 +826,29 @@ int rack_vst3_plugin_set_state(RackVST3Plugin* plugin, const uint8_t* data, size
     // Create memory stream from data (IPtr provides RAII cleanup)
     IPtr<MemoryStream> stream(new MemoryStream(data, size), false);
 
-    // Set component state
+    // Set component state (reads from position 0)
     tresult result = plugin->component->setState(stream);
     if (result != kResultOk) {
         return RACK_VST3_ERROR_GENERIC;
     }
 
-    // Reset stream position for controller
-    stream->seek(0, IBStream::kIBSeekSet, nullptr);
-
     // Set controller state if separate controller
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
-        result = plugin->controller->setState(stream);
-        if (result != kResultOk) {
-            return RACK_VST3_ERROR_GENERIC;
+        // Read the size marker to find where controller state begins
+        uint32_t component_state_size = 0;
+        int32 bytes_read = 0;
+        result = stream->read(&component_state_size, sizeof(component_state_size), &bytes_read);
+
+        if (result == kResultOk && bytes_read == sizeof(component_state_size)) {
+            // Controller state starts right after the size marker
+            // We're already at the correct position after reading the marker
+            result = plugin->controller->setState(stream);
+            if (result != kResultOk) {
+                return RACK_VST3_ERROR_GENERIC;
+            }
+        } else {
+            // No size marker found - might be old format or component-only state
+            // This is OK, just skip controller restoration
         }
     }
 
@@ -884,6 +909,7 @@ int rack_vst3_plugin_send_midi(
 
             case 0xB0:  // Control Change
                 // Use LegacyMIDICCOutEvent for CC messages
+                // This is the standard VST3 approach for MIDI CC data
                 vst3_event.type = Event::kLegacyMIDICCOutEvent;
                 vst3_event.midiCCOut.channel = midi_event.channel;
                 vst3_event.midiCCOut.controlNumber = midi_event.data1;
@@ -893,31 +919,37 @@ int rack_vst3_plugin_send_midi(
                 break;
 
             case 0xC0:  // Program Change
-                // Use LegacyMIDICCOutEvent for program change
+                // VST3 doesn't have a dedicated program change event type
+                // Use LegacyMIDICCOutEvent with controlNumber >= 0x80 for non-CC MIDI
+                // Note: Not all plugins may support this encoding
                 vst3_event.type = Event::kLegacyMIDICCOutEvent;
                 vst3_event.midiCCOut.channel = midi_event.channel;
-                vst3_event.midiCCOut.controlNumber = 0x80;  // Special value for program change
+                vst3_event.midiCCOut.controlNumber = 0x80;  // >= 0x80 indicates non-CC MIDI
                 vst3_event.midiCCOut.value = midi_event.data1;
                 vst3_event.midiCCOut.value2 = 0;
                 plugin->input_events.addEvent(vst3_event);
                 break;
 
             case 0xD0:  // Channel Pressure (Aftertouch)
-                // Use LegacyMIDICCOutEvent for channel pressure
+                // VST3 doesn't have a dedicated channel pressure event type
+                // Use LegacyMIDICCOutEvent with controlNumber >= 0x80 for non-CC MIDI
+                // Note: Not all plugins may support this encoding
                 vst3_event.type = Event::kLegacyMIDICCOutEvent;
                 vst3_event.midiCCOut.channel = midi_event.channel;
-                vst3_event.midiCCOut.controlNumber = 0x81;  // Special value for channel pressure
+                vst3_event.midiCCOut.controlNumber = 0x81;  // >= 0x80 indicates non-CC MIDI
                 vst3_event.midiCCOut.value = midi_event.data1;
                 vst3_event.midiCCOut.value2 = 0;
                 plugin->input_events.addEvent(vst3_event);
                 break;
 
             case 0xE0: {  // Pitch Bend
-                // VST3 expects pitch bend as LegacyMIDICCOutEvent with raw MIDI data
-                // The plugin will interpret data1 (LSB) and data2 (MSB) as 14-bit value
+                // VST3 doesn't have a dedicated pitch bend event type
+                // Use LegacyMIDICCOutEvent with controlNumber >= 0x80 for non-CC MIDI
+                // Note: Not all plugins may support this encoding
+                // The plugin should interpret value (LSB) and value2 (MSB) as 14-bit pitch bend
                 vst3_event.type = Event::kLegacyMIDICCOutEvent;
                 vst3_event.midiCCOut.channel = midi_event.channel;
-                vst3_event.midiCCOut.controlNumber = 0x82;  // Special value for pitch bend
+                vst3_event.midiCCOut.controlNumber = 0x82;  // >= 0x80 indicates non-CC MIDI
                 vst3_event.midiCCOut.value = midi_event.data1;   // LSB
                 vst3_event.midiCCOut.value2 = midi_event.data2;  // MSB
                 plugin->input_events.addEvent(vst3_event);

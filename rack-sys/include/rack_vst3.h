@@ -211,6 +211,12 @@ int rack_vst3_plugin_get_preset_info(
 // Load a factory preset by preset number
 // preset_number: the preset number from get_preset_info()
 // Returns 0 on success, negative error code on failure
+//
+// LIMITATION: This function requires the VST3 plugin to support IProgramListData interface.
+// Some plugins may not support this interface and will return RACK_VST3_ERROR_GENERIC.
+// In such cases, preset loading is not available for those plugins.
+// The function will enumerate presets successfully but loading them may fail.
+//
 // Thread-safety: Should be called from the same thread that owns the plugin instance.
 int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number);
 

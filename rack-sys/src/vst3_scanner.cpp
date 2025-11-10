@@ -131,13 +131,16 @@ int rack_vst3_scanner_scan(RackVST3Scanner* scanner, RackVST3PluginInfo* plugins
         paths_to_scan = get_default_vst3_paths();
     }
 
-    // Get all module paths using VST3 SDK's discovery
-    // Note: This gets system-wide VST3 plugins
+    // Collect all module paths
+    // Note: VST3 SDK's getModulePaths() only returns system-wide default paths
+    // For custom paths, we currently use the system paths only
+    // TODO: Implement manual .vst3 bundle scanning for custom directories
     auto module_paths = Hosting::Module::getModulePaths();
 
-    // TODO: Add support for custom search paths
-    // For now, we rely on the SDK's module discovery which finds plugins in standard locations
-    (void)paths_to_scan;  // Suppress unused variable warning
+    // Custom path scanning not yet fully implemented
+    // VST3::Hosting::Module::getModulePaths() doesn't accept custom paths
+    // Would need to manually scan directories for .vst3 bundles/folders
+    (void)paths_to_scan;  // Suppress unused warning for now
 
     // Scan all found modules
     for (const auto& module_path : module_paths) {
@@ -196,12 +199,25 @@ int rack_vst3_scanner_scan(RackVST3Scanner* scanner, RackVST3PluginInfo* plugins
             strncpy(info.unique_id, uid_str.c_str(), sizeof(info.unique_id) - 1);
             info.unique_id[sizeof(info.unique_id) - 1] = '\0';
 
-            // Version
-            std::string version = class_info.version();
-            // Parse version string (e.g., "1.0.0") to uint32_t
-            // For simplicity, we'll just use 0 for now
-            // TODO: Implement proper version parsing
-            info.version = 0;
+            // Version - parse version string (e.g., "1.0.0" or "1.2.3.4") to uint32_t
+            // Format: major.minor.patch.build -> pack into uint32_t
+            std::string version_str = class_info.version();
+            uint32_t version = 0;
+            if (!version_str.empty()) {
+                int major = 0, minor = 0, patch = 0, build = 0;
+                // Try to parse up to 4 components
+                int parsed = sscanf(version_str.c_str(), "%d.%d.%d.%d", &major, &minor, &patch, &build);
+                if (parsed >= 1) {
+                    // Pack into uint32_t: major(8) | minor(8) | patch(8) | build(8)
+                    version = static_cast<uint32_t>(
+                        ((major & 0xFF) << 24) |
+                        ((minor & 0xFF) << 16) |
+                        ((patch & 0xFF) << 8) |
+                        (build & 0xFF)
+                    );
+                }
+            }
+            info.version = version;
 
             // Type (from subcategories)
             std::string subcategories = class_info.subCategoriesString();
