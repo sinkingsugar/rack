@@ -10,11 +10,14 @@
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 #include "pluginterfaces/vst/ivstunits.h"
+#include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/vst/ivsthostapplication.h"
 
 #include <vector>
 #include <string>
 #include <cstring>
 #include <mutex>
+#include <algorithm>
 
 using namespace VST3;
 using namespace Steinberg;
@@ -86,6 +89,112 @@ static bool string_to_uid(const char* str, VST3::UID& uid) {
     return true;
 }
 
+// Memory stream implementation for state serialization
+class MemoryStream : public IBStream {
+public:
+    MemoryStream() : ref_count_(1), position_(0) {}
+    MemoryStream(const uint8_t* data, size_t size) : ref_count_(1), position_(0) {
+        buffer_.assign(data, data + size);
+    }
+
+    virtual ~MemoryStream() = default;
+
+    // IUnknown
+    DECLARE_FUNKNOWN_METHODS
+
+    // IBStream
+    tresult PLUGIN_API read(void* buffer, int32 numBytes, int32* numBytesRead) override {
+        if (!buffer || numBytes < 0) {
+            return kInvalidArgument;
+        }
+
+        int32 available = static_cast<int32>(buffer_.size()) - position_;
+        int32 to_read = std::min(numBytes, available);
+
+        if (to_read > 0) {
+            memcpy(buffer, buffer_.data() + position_, to_read);
+            position_ += to_read;
+        }
+
+        if (numBytesRead) {
+            *numBytesRead = to_read;
+        }
+
+        return to_read == numBytes ? kResultOk : kResultFalse;
+    }
+
+    tresult PLUGIN_API write(void* buffer, int32 numBytes, int32* numBytesWritten) override {
+        if (!buffer || numBytes < 0) {
+            return kInvalidArgument;
+        }
+
+        // Resize buffer if needed
+        if (position_ + numBytes > static_cast<int32>(buffer_.size())) {
+            buffer_.resize(position_ + numBytes);
+        }
+
+        memcpy(buffer_.data() + position_, buffer, numBytes);
+        position_ += numBytes;
+
+        if (numBytesWritten) {
+            *numBytesWritten = numBytes;
+        }
+
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override {
+        switch (mode) {
+            case kIBSeekSet:
+                position_ = static_cast<int32>(pos);
+                break;
+            case kIBSeekCur:
+                position_ += static_cast<int32>(pos);
+                break;
+            case kIBSeekEnd:
+                position_ = static_cast<int32>(buffer_.size()) + static_cast<int32>(pos);
+                break;
+            default:
+                return kInvalidArgument;
+        }
+
+        position_ = std::max(0, std::min(position_, static_cast<int32>(buffer_.size())));
+
+        if (result) {
+            *result = position_;
+        }
+
+        return kResultOk;
+    }
+
+    tresult PLUGIN_API tell(int64* pos) override {
+        if (!pos) {
+            return kInvalidArgument;
+        }
+        *pos = position_;
+        return kResultOk;
+    }
+
+    // Accessors
+    const std::vector<uint8_t>& getData() const { return buffer_; }
+    size_t getSize() const { return buffer_.size(); }
+    void clear() { buffer_.clear(); position_ = 0; }
+
+private:
+    std::atomic<uint32> ref_count_;
+    std::vector<uint8_t> buffer_;
+    int32 position_;
+};
+
+IMPLEMENT_REFCOUNT(MemoryStream)
+
+tresult PLUGIN_API MemoryStream::queryInterface(const TUID _iid, void** obj) {
+    QUERY_INTERFACE(_iid, obj, FUnknown::iid, IBStream)
+    QUERY_INTERFACE(_iid, obj, IBStream::iid, IBStream)
+    *obj = nullptr;
+    return kNoInterface;
+}
+
 // Internal plugin state
 struct RackVST3Plugin {
     // Module and factory
@@ -134,6 +243,14 @@ struct RackVST3Plugin {
         ParamValue default_value;
     };
     std::vector<ParameterInfo> parameters;
+
+    // Preset cache (factory presets from IUnitInfo)
+    struct PresetInfo {
+        int32 program_list_id;
+        int32 program_index;
+        std::string name;
+    };
+    std::vector<PresetInfo> presets;
 };
 
 // ============================================================================
@@ -336,6 +453,28 @@ int rack_vst3_plugin_initialize(RackVST3Plugin* plugin, double sample_rate, uint
         }
     }
 
+    // Enumerate factory presets if available
+    IPtr<IUnitInfo> unit_info = U::cast<IUnitInfo>(plugin->controller);
+    if (unit_info) {
+        int32 program_list_count = unit_info->getProgramListCount();
+        for (int32 i = 0; i < program_list_count; ++i) {
+            ProgramListInfo list_info;
+            if (unit_info->getProgramListInfo(i, list_info) == kResultOk) {
+                // Enumerate programs in this list
+                for (int32 j = 0; j < list_info.programCount; ++j) {
+                    String128 program_name;
+                    if (unit_info->getProgramName(list_info.id, j, program_name) == kResultOk) {
+                        RackVST3Plugin::PresetInfo preset;
+                        preset.program_list_id = list_info.id;
+                        preset.program_index = j;
+                        preset.name = utf16_to_utf8(program_name);
+                        plugin->presets.push_back(preset);
+                    }
+                }
+            }
+        }
+    }
+
     plugin->initialized = true;
     return RACK_VST3_OK;
 }
@@ -514,9 +653,10 @@ int rack_vst3_plugin_parameter_info(
 // ============================================================================
 
 int rack_vst3_plugin_get_preset_count(RackVST3Plugin* plugin) {
-    // VST3 presets are handled through IUnitInfo interface
-    // TODO: Implement preset enumeration
-    return 0;
+    if (!plugin || !plugin->initialized) {
+        return 0;
+    }
+    return static_cast<int>(plugin->presets.size());
 }
 
 int rack_vst3_plugin_get_preset_info(
@@ -526,36 +666,151 @@ int rack_vst3_plugin_get_preset_info(
     size_t name_size,
     int32_t* preset_number)
 {
-    // TODO: Implement
-    return RACK_VST3_ERROR_NOT_FOUND;
+    if (!plugin || !plugin->initialized || !name || name_size == 0) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
+    if (index >= plugin->presets.size()) {
+        return RACK_VST3_ERROR_NOT_FOUND;
+    }
+
+    const auto& preset = plugin->presets[index];
+
+    // Copy name
+    strncpy(name, preset.name.c_str(), name_size - 1);
+    name[name_size - 1] = '\0';
+
+    // Preset number is just the index
+    if (preset_number) {
+        *preset_number = static_cast<int32_t>(index);
+    }
+
+    return RACK_VST3_OK;
 }
 
 int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) {
-    // TODO: Implement
-    return RACK_VST3_ERROR_NOT_FOUND;
+    if (!plugin || !plugin->initialized || !plugin->controller) {
+        return RACK_VST3_ERROR_NOT_INITIALIZED;
+    }
+
+    if (preset_number < 0 || preset_number >= static_cast<int32_t>(plugin->presets.size())) {
+        return RACK_VST3_ERROR_NOT_FOUND;
+    }
+
+    const auto& preset = plugin->presets[preset_number];
+
+    // VST3 preset loading is complex - requires IProgramListData interface
+    // Get IProgramListData from IUnitInfo
+    IPtr<IUnitInfo> unit_info = U::cast<IUnitInfo>(plugin->controller);
+    if (!unit_info) {
+        return RACK_VST3_ERROR_GENERIC;
+    }
+
+    // Try to get preset data using IProgramListData
+    IPtr<IProgramListData> program_data = U::cast<IProgramListData>(unit_info);
+    if (program_data) {
+        // Create stream to receive preset data
+        MemoryStream* stream = new MemoryStream();
+
+        // Get program data
+        tresult result = program_data->getProgramData(preset.program_list_id, preset.program_index, stream);
+        if (result == kResultOk) {
+            // Reset stream and apply the preset data
+            stream->seek(0, IBStream::kIBSeekSet, nullptr);
+            result = program_data->setProgramData(preset.program_list_id, preset.program_index, stream);
+            delete stream;
+
+            if (result == kResultOk) {
+                return RACK_VST3_OK;
+            }
+        }
+        delete stream;
+    }
+
+    // Fallback: Some plugins don't support IProgramListData
+    // In this case, preset loading is not fully supported
+    // TODO: Implement alternative methods (parameter-based preset loading)
+    return RACK_VST3_ERROR_GENERIC;
 }
 
 int rack_vst3_plugin_get_state_size(RackVST3Plugin* plugin) {
-    // VST3 state is handled through IBStream
-    // Size is not known in advance
-    // Return a reasonable maximum for now
+    // VST3 state size is not known in advance
+    // Return a reasonable maximum
     return 1024 * 1024;  // 1 MB max
 }
 
 int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* size) {
-    // TODO: Implement using IComponent::getState()
-    if (!plugin || !data || !size) {
+    if (!plugin || !data || !size || !plugin->component) {
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
-    return RACK_VST3_ERROR_GENERIC;
+
+    if (*size == 0) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
+    // Create memory stream for component state
+    MemoryStream* stream = new MemoryStream();
+
+    // Get component state
+    tresult result = plugin->component->getState(stream);
+    if (result != kResultOk) {
+        delete stream;
+        return RACK_VST3_ERROR_GENERIC;
+    }
+
+    // Get controller state if separate controller
+    if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
+        result = plugin->controller->getState(stream);
+        if (result != kResultOk) {
+            delete stream;
+            return RACK_VST3_ERROR_GENERIC;
+        }
+    }
+
+    // Copy to output buffer
+    size_t state_size = stream->getSize();
+    if (state_size > *size) {
+        delete stream;
+        *size = state_size;  // Return required size
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
+    memcpy(data, stream->getData().data(), state_size);
+    *size = state_size;
+    delete stream;
+
+    return RACK_VST3_OK;
 }
 
 int rack_vst3_plugin_set_state(RackVST3Plugin* plugin, const uint8_t* data, size_t size) {
-    // TODO: Implement using IComponent::setState()
-    if (!plugin || !data) {
+    if (!plugin || !data || size == 0 || !plugin->component) {
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
-    return RACK_VST3_ERROR_GENERIC;
+
+    // Create memory stream from data
+    MemoryStream* stream = new MemoryStream(data, size);
+
+    // Set component state
+    tresult result = plugin->component->setState(stream);
+    if (result != kResultOk) {
+        delete stream;
+        return RACK_VST3_ERROR_GENERIC;
+    }
+
+    // Reset stream position for controller
+    stream->seek(0, IBStream::kIBSeekSet, nullptr);
+
+    // Set controller state if separate controller
+    if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
+        result = plugin->controller->setState(stream);
+        if (result != kResultOk) {
+            delete stream;
+            return RACK_VST3_ERROR_GENERIC;
+        }
+    }
+
+    delete stream;
+    return RACK_VST3_OK;
 }
 
 // ============================================================================
@@ -589,6 +844,7 @@ int rack_vst3_plugin_send_midi(
                 vst3_event.noteOn.pitch = midi_event.data1;
                 vst3_event.noteOn.velocity = static_cast<float>(midi_event.data2) / 127.0f;
                 vst3_event.noteOn.noteId = -1;  // Not specified
+                plugin->input_events.addEvent(vst3_event);
                 break;
 
             case 0x80:  // Note Off
@@ -597,16 +853,63 @@ int rack_vst3_plugin_send_midi(
                 vst3_event.noteOff.pitch = midi_event.data1;
                 vst3_event.noteOff.velocity = static_cast<float>(midi_event.data2) / 127.0f;
                 vst3_event.noteOff.noteId = -1;  // Not specified
+                plugin->input_events.addEvent(vst3_event);
                 break;
 
+            case 0xA0:  // Polyphonic Key Pressure (Aftertouch)
+                vst3_event.type = Event::kPolyPressureEvent;
+                vst3_event.polyPressure.channel = midi_event.channel;
+                vst3_event.polyPressure.pitch = midi_event.data1;
+                vst3_event.polyPressure.pressure = static_cast<float>(midi_event.data2) / 127.0f;
+                plugin->input_events.addEvent(vst3_event);
+                break;
+
+            case 0xB0:  // Control Change
+                // Use LegacyMIDICCOutEvent for CC messages
+                vst3_event.type = Event::kLegacyMIDICCOutEvent;
+                vst3_event.midiCCOut.channel = midi_event.channel;
+                vst3_event.midiCCOut.controlNumber = midi_event.data1;
+                vst3_event.midiCCOut.value = midi_event.data2;
+                vst3_event.midiCCOut.value2 = 0;
+                plugin->input_events.addEvent(vst3_event);
+                break;
+
+            case 0xC0:  // Program Change
+                // Use LegacyMIDICCOutEvent for program change
+                vst3_event.type = Event::kLegacyMIDICCOutEvent;
+                vst3_event.midiCCOut.channel = midi_event.channel;
+                vst3_event.midiCCOut.controlNumber = 0x80;  // Special value for program change
+                vst3_event.midiCCOut.value = midi_event.data1;
+                vst3_event.midiCCOut.value2 = 0;
+                plugin->input_events.addEvent(vst3_event);
+                break;
+
+            case 0xD0:  // Channel Pressure (Aftertouch)
+                // Use LegacyMIDICCOutEvent for channel pressure
+                vst3_event.type = Event::kLegacyMIDICCOutEvent;
+                vst3_event.midiCCOut.channel = midi_event.channel;
+                vst3_event.midiCCOut.controlNumber = 0x81;  // Special value for channel pressure
+                vst3_event.midiCCOut.value = midi_event.data1;
+                vst3_event.midiCCOut.value2 = 0;
+                plugin->input_events.addEvent(vst3_event);
+                break;
+
+            case 0xE0: {  // Pitch Bend
+                // VST3 expects pitch bend as LegacyMIDICCOutEvent with raw MIDI data
+                // The plugin will interpret data1 (LSB) and data2 (MSB) as 14-bit value
+                vst3_event.type = Event::kLegacyMIDICCOutEvent;
+                vst3_event.midiCCOut.channel = midi_event.channel;
+                vst3_event.midiCCOut.controlNumber = 0x82;  // Special value for pitch bend
+                vst3_event.midiCCOut.value = midi_event.data1;   // LSB
+                vst3_event.midiCCOut.value2 = midi_event.data2;  // MSB
+                plugin->input_events.addEvent(vst3_event);
+                break;
+            }
+
             default:
-                // For other MIDI events, we'd need to use LegacyMIDICCOutEvent
-                // or implement proper conversion
-                // TODO: Implement full MIDI event conversion
+                // Unknown MIDI event - skip it
                 continue;
         }
-
-        plugin->input_events.addEvent(vst3_event);
     }
 
     return RACK_VST3_OK;
