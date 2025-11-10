@@ -1,5 +1,5 @@
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
@@ -7,7 +7,6 @@ fn main() {
     ensure_vst3_sdk();
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap();
 
     // Check if ASAN should be enabled
     let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
