@@ -20,35 +20,58 @@ if(APPLE)
     endif()
 endif()
 
-# VST3 source files (cross-platform)
-set(RACK_VST3_SOURCES
-    src/vst3_scanner.cpp
-    src/vst3_instance.cpp
-)
-
-# VST3 SDK hosting sources
-set(VST3_SDK_SOURCES
-    external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/hostclasses.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/processdata.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/parameterchanges.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/eventlist.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/connectionproxy.cpp
-    external/vst3sdk/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
-)
-
-# Platform-specific VST3 module loading
-if(APPLE)
-    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_mac.mm)
-elseif(WIN32)
-    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_win32.cpp)
+# Check if VST3 SDK is available
+set(VST3_SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+if(EXISTS "${VST3_SDK_PATH}/CMakeLists.txt")
+    set(HAVE_VST3_SDK TRUE)
+    message(STATUS "VST3 SDK found at ${VST3_SDK_PATH}")
 else()
-    list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_linux.cpp)
+    set(HAVE_VST3_SDK FALSE)
+    message(WARNING "VST3 SDK not found at ${VST3_SDK_PATH}")
+    message(WARNING "VST3 support will be disabled. To enable it:")
+    message(WARNING "  cd ${CMAKE_CURRENT_SOURCE_DIR} && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
+endif()
+
+# VST3 source files (cross-platform, only if SDK available)
+set(RACK_VST3_SOURCES)
+set(VST3_SDK_SOURCES)
+if(HAVE_VST3_SDK)
+    set(RACK_VST3_SOURCES
+        src/vst3_scanner.cpp
+        src/vst3_instance.cpp
+    )
+
+    # VST3 SDK hosting sources
+    set(VST3_SDK_SOURCES
+        external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/hostclasses.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/processdata.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/parameterchanges.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/eventlist.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/connectionproxy.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+    )
+
+    # Platform-specific VST3 module loading
+    if(APPLE)
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_mac.mm)
+    elseif(WIN32)
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_win32.cpp)
+    else()
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_linux.cpp)
+    endif()
 endif()
 
 # Combine all sources
 set(RACK_SYS_SOURCES ${RACK_AU_SOURCES} ${RACK_VST3_SOURCES} ${VST3_SDK_SOURCES})
+
+# Validate that we have at least one plugin format
+if(NOT RACK_AU_SOURCES AND NOT RACK_VST3_SOURCES)
+    message(FATAL_ERROR "No plugin formats available! "
+        "On macOS/iOS, AudioUnit support should be automatic. "
+        "For VST3, clone the SDK: git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
+endif()
 
 # Build as static library for easy linking with Rust
 add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
@@ -56,8 +79,14 @@ add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
 # Public headers
 target_include_directories(rack_sys PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk
 )
+
+# Add VST3 SDK include directory if available
+if(HAVE_VST3_SDK)
+    target_include_directories(rack_sys PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk
+    )
+endif()
 
 # Apple platform-specific settings
 if(APPLE)

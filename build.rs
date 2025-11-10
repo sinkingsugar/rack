@@ -145,20 +145,19 @@ fn ensure_vst3_sdk() {
             eprintln!("VST3 SDK cloned successfully");
         }
         Ok(status) => {
-            panic!(
-                "Failed to clone VST3 SDK (exit code: {:?}). \
-                 Please clone it manually:\n  \
-                 cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk",
+            eprintln!(
+                "Warning: Failed to clone VST3 SDK (exit code: {:?})",
                 status.code()
             );
+            eprintln!("VST3 support will be disabled.");
+            eprintln!("To enable VST3, clone the SDK manually:");
+            eprintln!("  cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk");
         }
         Err(e) => {
-            panic!(
-                "Failed to execute git clone: {}. \
-                 Please ensure git is installed and clone VST3 SDK manually:\n  \
-                 cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk",
-                e
-            );
+            eprintln!("Warning: Failed to execute git clone: {}", e);
+            eprintln!("VST3 support will be disabled.");
+            eprintln!("To enable VST3, ensure git is installed and clone the SDK manually:");
+            eprintln!("  cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk");
         }
     }
 }
