@@ -50,7 +50,8 @@ static std::string utf16_to_utf8(const char16* utf16_str) {
             result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
         } else if (c >= 0xD800 && c <= 0xDBFF) {
             // High surrogate - need to read low surrogate
-            if (*utf16_str >= 0xDC00 && *utf16_str <= 0xDFFF) {
+            // CRITICAL: Check for null terminator BEFORE reading next character
+            if (*utf16_str != 0 && *utf16_str >= 0xDC00 && *utf16_str <= 0xDFFF) {
                 // Valid surrogate pair
                 uint32_t codepoint = 0x10000 + ((c & 0x3FF) << 10) + (*utf16_str++ & 0x3FF);
                 // 4 bytes
@@ -59,7 +60,8 @@ static std::string utf16_to_utf8(const char16* utf16_str) {
                 result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
                 result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
             } else {
-                // Invalid surrogate pair - replace with replacement character
+                // Invalid surrogate pair or string ends with high surrogate
+                // Replace with replacement character
                 result.push_back('?');
             }
         } else if (c >= 0xDC00 && c <= 0xDFFF) {
@@ -526,6 +528,19 @@ int rack_vst3_plugin_process(
         return RACK_VST3_ERROR_NOT_INITIALIZED;
     }
 
+    // Validate input parameters to prevent buffer overruns
+    // Channel counts must match what was configured during initialization
+    if (num_input_channels != static_cast<uint32_t>(plugin->num_input_channels)) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+    if (num_output_channels != static_cast<uint32_t>(plugin->num_output_channels)) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+    // Frame count must not exceed the max block size configured during initialization
+    if (frames > plugin->max_block_size) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
     // Update dynamic fields only (prepare() was called during initialization)
     plugin->process_data.numSamples = frames;
 
@@ -709,7 +724,12 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
     // Try to get preset data using IProgramListData
     IPtr<IProgramListData> program_data = U::cast<IProgramListData>(unit_info);
     if (program_data) {
-        // Create stream to receive preset data (IPtr provides RAII cleanup)
+        // Create stream to receive preset data
+        // IPtr<MemoryStream>(new MemoryStream(), false) explanation:
+        //   - new MemoryStream() creates object with refCount=1 (COM convention)
+        //   - IPtr(..., false) takes ownership WITHOUT calling addRef() (false = don't addRef)
+        //   - IPtr destructor calls release() when going out of scope
+        //   - This ensures cleanup on ALL code paths (success, error, early return)
         IPtr<MemoryStream> stream(new MemoryStream(), false);
 
         // Get program data
@@ -747,7 +767,8 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
-    // Create memory stream for component state (IPtr provides RAII cleanup)
+    // Create memory stream for component state
+    // IPtr ensures automatic cleanup on ALL code paths (success, error, buffer size check failure)
     IPtr<MemoryStream> stream(new MemoryStream(), false);
 
     // Get component state
@@ -765,9 +786,12 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
     }
 
     // Copy to output buffer
+    // Note: MemoryStream grows dynamically - no fixed limit, can't overflow
+    // The 1MB from get_state_size() is just a hint for buffer allocation
+    // Here we check if the ACTUAL state fits in the caller's buffer
     size_t state_size = stream->getSize();
     if (state_size > *size) {
-        *size = state_size;  // Return required size
+        *size = state_size;  // Return required size for caller to retry
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
