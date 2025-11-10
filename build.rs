@@ -3,10 +3,16 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    // Ensure VST3 SDK is available
-    ensure_vst3_sdk();
-
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+
+    // VST3 is only supported on desktop platforms (macOS, Linux, Windows)
+    // Skip VST3 SDK setup on iOS/tvOS/watchOS/visionOS
+    let is_desktop = matches!(target_os.as_str(), "macos" | "linux" | "windows");
+    if is_desktop {
+        ensure_vst3_sdk();
+    } else {
+        eprintln!("Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)", target_os);
+    }
 
     // Check if ASAN should be enabled
     let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();

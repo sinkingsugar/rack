@@ -21,12 +21,17 @@ if(APPLE)
 endif()
 
 # Check if VST3 SDK is available
+# VST3 is only supported on desktop platforms (macOS, Linux, Windows)
 set(VST3_SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
-if(EXISTS "${VST3_SDK_PATH}/CMakeLists.txt")
+set(HAVE_VST3_SDK FALSE)
+
+# VST3 is not supported on mobile platforms
+if(CMAKE_SYSTEM_NAME MATCHES "iOS|tvOS|watchOS|visionOS")
+    message(STATUS "VST3 disabled on ${CMAKE_SYSTEM_NAME} (desktop-only format)")
+elseif(EXISTS "${VST3_SDK_PATH}/CMakeLists.txt")
     set(HAVE_VST3_SDK TRUE)
     message(STATUS "VST3 SDK found at ${VST3_SDK_PATH}")
 else()
-    set(HAVE_VST3_SDK FALSE)
     message(WARNING "VST3 SDK not found at ${VST3_SDK_PATH}")
     message(WARNING "VST3 support will be disabled. To enable it:")
     message(WARNING "  cd ${CMAKE_CURRENT_SOURCE_DIR} && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
