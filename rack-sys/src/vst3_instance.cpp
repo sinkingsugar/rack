@@ -80,11 +80,18 @@ static std::string utf16_to_utf8(const char16* utf16_str) {
                 uint32_t low_bits = (low & 0x3FF);     // 10 bits from low surrogate
                 uint32_t codepoint = 0x10000 + (high_bits << 10) + low_bits;
 
-                // Encode as 4-byte UTF-8 sequence
-                result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
-                result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-                result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-                result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                // Validate codepoint is within valid Unicode range
+                // Max valid codepoint is 0x10FFFF (which is exactly 0x10000 + (0x3FF << 10) + 0x3FF)
+                if (codepoint > 0x10FFFF) {
+                    // Overflow - invalid codepoint (should never happen with valid surrogates)
+                    result.append("\xEF\xBF\xBD"); // UTF-8 replacement character U+FFFD
+                } else {
+                    // Encode as 4-byte UTF-8 sequence
+                    result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+                    result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+                    result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                    result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                }
             } else {
                 // Malformed: High surrogate not followed by low surrogate
                 result.append("\xEF\xBF\xBD"); // UTF-8 replacement character U+FFFD
@@ -210,7 +217,7 @@ public:
     void clear() { buffer_.clear(); position_ = 0; }
 
 private:
-    std::atomic<uint32> ref_count_;
+    uint32 ref_count_;  // Non-atomic - IMPLEMENT_REFCOUNT macro handles thread-safety
     std::vector<uint8_t> buffer_;
     int32 position_;
 };
@@ -513,11 +520,16 @@ int rack_vst3_plugin_is_initialized(RackVST3Plugin* plugin) {
 }
 
 int rack_vst3_plugin_reset(RackVST3Plugin* plugin) {
+    // Check null pointer BEFORE acquiring mutex (no lock needed if null)
+    if (!plugin) {
+        return RACK_VST3_ERROR_NOT_INITIALIZED;
+    }
+
     // Acquire mutex BEFORE checking state to prevent TOCTOU race condition
     // Without this, another thread could change initialized between check and lock
     std::lock_guard<std::mutex> lock(g_vst3_lifecycle_mutex);
 
-    if (!plugin || !plugin->initialized || !plugin->component) {
+    if (!plugin->initialized || !plugin->component) {
         return RACK_VST3_ERROR_NOT_INITIALIZED;
     }
 
@@ -914,19 +926,31 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
     // IPtr ensures automatic cleanup on ALL code paths (success, error, buffer size check failure)
     IPtr<MemoryStream> stream(new MemoryStream(), false);
 
+    // Reserve space for component state size marker (write it later)
+    uint32_t size_marker_placeholder = 0;
+    stream->write(&size_marker_placeholder, sizeof(size_marker_placeholder), nullptr);
+
+    // Record position before component state
+    int64 component_start_pos = 0;
+    stream->tell(&component_start_pos);
+
     // Get component state
     tresult result = plugin->component->getState(stream);
     if (result != kResultOk) {
         return RACK_VST3_ERROR_GENERIC;
     }
 
-    // Record component state size for proper deserialization later
-    int64 component_state_size = 0;
-    stream->tell(&component_state_size);
+    // Record position after component state (= size of component state)
+    int64 component_end_pos = 0;
+    stream->tell(&component_end_pos);
+    uint32_t component_state_size = static_cast<uint32_t>(component_end_pos - component_start_pos);
 
-    // Write component state size as a marker (uint32_t)
-    uint32_t size_marker = static_cast<uint32_t>(component_state_size);
-    stream->write(&size_marker, sizeof(size_marker), nullptr);
+    // Write component state size marker at the beginning
+    stream->seek(0, IBStream::kIBSeekSet, nullptr);
+    stream->write(&component_state_size, sizeof(component_state_size), nullptr);
+
+    // Seek back to end to append controller state
+    stream->seek(component_end_pos, IBStream::kIBSeekSet, nullptr);
 
     // Get controller state if separate controller
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
@@ -961,29 +985,28 @@ int rack_vst3_plugin_set_state(RackVST3Plugin* plugin, const uint8_t* data, size
     // Create memory stream from data (IPtr provides RAII cleanup)
     IPtr<MemoryStream> stream(new MemoryStream(data, size), false);
 
-    // Set component state (reads from position 0)
-    tresult result = plugin->component->setState(stream);
+    // Read component state size marker first (written at position 0 during serialization)
+    uint32_t component_state_size = 0;
+    int32 bytes_read = 0;
+    tresult result = stream->read(&component_state_size, sizeof(component_state_size), &bytes_read);
+
+    if (result != kResultOk || bytes_read != sizeof(component_state_size)) {
+        return RACK_VST3_ERROR_GENERIC;
+    }
+
+    // Set component state (reads from current position, right after size marker)
+    result = plugin->component->setState(stream);
     if (result != kResultOk) {
         return RACK_VST3_ERROR_GENERIC;
     }
 
     // Set controller state if separate controller
     if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
-        // Read the size marker to find where controller state begins
-        uint32_t component_state_size = 0;
-        int32 bytes_read = 0;
-        result = stream->read(&component_state_size, sizeof(component_state_size), &bytes_read);
-
-        if (result == kResultOk && bytes_read == sizeof(component_state_size)) {
-            // Controller state starts right after the size marker
-            // We're already at the correct position after reading the marker
-            result = plugin->controller->setState(stream);
-            if (result != kResultOk) {
-                return RACK_VST3_ERROR_GENERIC;
-            }
-        } else {
-            // No size marker found - might be old format or component-only state
-            // This is OK, just skip controller restoration
+        // Stream is now positioned right after component state
+        // Controller state follows immediately
+        result = plugin->controller->setState(stream);
+        if (result != kResultOk) {
+            return RACK_VST3_ERROR_GENERIC;
         }
     }
 
