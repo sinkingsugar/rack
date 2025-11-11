@@ -610,4 +610,111 @@ mod tests {
         } // Plugin dropped here
           // If Drop is implemented correctly, this shouldn't leak or crash
     }
+
+    #[test]
+    fn test_parameter_range_clamping() {
+        let (scanner, info) = match get_test_plugin() {
+            Ok(result) => result,
+            Err(_) => {
+                println!("Skipping test - no VST3 plugins found");
+                return;
+            }
+        };
+
+        let mut plugin = scanner.load(&info).expect("Plugin creation should succeed");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Plugin initialization should succeed");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            println!("Plugin has no parameters, skipping clamping test");
+            return;
+        }
+
+        // Test setting values outside 0.0-1.0 range (should be clamped by C++ layer)
+        plugin
+            .set_parameter(0, 2.0)
+            .expect("Should handle value > 1.0");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value <= 1.0,
+            "Value > 1.0 should be clamped to 1.0, got {}",
+            value
+        );
+
+        plugin
+            .set_parameter(0, -1.0)
+            .expect("Should handle value < 0.0");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0,
+            "Value < 0.0 should be clamped to 0.0, got {}",
+            value
+        );
+    }
+
+    #[test]
+    fn test_parameter_extreme_values() {
+        let (scanner, info) = match get_test_plugin() {
+            Ok(result) => result,
+            Err(_) => {
+                println!("Skipping test - no VST3 plugins found");
+                return;
+            }
+        };
+
+        let mut plugin = scanner.load(&info).expect("Plugin creation should succeed");
+        plugin
+            .initialize(48000.0, 512)
+            .expect("Plugin initialization should succeed");
+
+        let count = plugin.parameter_count();
+        if count == 0 {
+            println!("Plugin has no parameters, skipping extreme values test");
+            return;
+        }
+
+        // Test extreme values (clamped by C++ layer before passing to VST3)
+        plugin
+            .set_parameter(0, -1000.0)
+            .expect("Should handle extreme negative values");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0 && value <= 1.0,
+            "Extreme negative value should be clamped to 0.0-1.0, got {}",
+            value
+        );
+
+        plugin
+            .set_parameter(0, 1000.0)
+            .expect("Should handle extreme positive values");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0 && value <= 1.0,
+            "Extreme positive value should be clamped to 0.0-1.0, got {}",
+            value
+        );
+
+        // Test f32::INFINITY and f32::NEG_INFINITY
+        plugin
+            .set_parameter(0, f32::INFINITY)
+            .expect("Should handle f32::INFINITY");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0 && value <= 1.0,
+            "f32::INFINITY should be clamped to 0.0-1.0, got {}",
+            value
+        );
+
+        plugin
+            .set_parameter(0, f32::NEG_INFINITY)
+            .expect("Should handle f32::NEG_INFINITY");
+        let value = plugin.get_parameter(0).expect("Failed to get parameter");
+        assert!(
+            value >= 0.0 && value <= 1.0,
+            "f32::NEG_INFINITY should be clamped to 0.0-1.0, got {}",
+            value
+        );
+    }
 }
