@@ -37,6 +37,12 @@ pub enum PluginType {
     /// Format converter
     FormatConverter,
 
+    /// Analyzer (spectral/metering plugins)
+    Analyzer,
+
+    /// Spatial audio processor (surround, binaural, etc.)
+    Spatial,
+
     /// Other/unknown type
     Other,
 }

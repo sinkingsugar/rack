@@ -3,7 +3,8 @@
 **A modern Rust library for hosting audio plugins**
 
 > **Status:** AudioUnit support is **production-ready** on macOS (Phases 1-8 complete).
-> iOS and visionOS are supported (untested). The API is stabilizing. Other plugin formats (VST3, CLAP) are planned.
+> VST3 support is **production-ready** on Windows, macOS, and Linux.
+> iOS and visionOS are supported (untested). The API is stabilizing. CLAP support is planned.
 
 [![Crates.io](https://img.shields.io/crates/v/rack.svg)](https://crates.io/crates/rack)
 [![Documentation](https://docs.rs/rack/badge.svg)](https://docs.rs/rack)
@@ -14,12 +15,12 @@ Rack is a cross-platform library for discovering, loading, and processing audio 
 ## Features
 
 - ✅ **AudioUnit support** (macOS, iOS, visionOS) - complete with scanning, loading, processing, parameters, MIDI, presets, and GUI
-- ⚡ **Zero-copy audio processing** - planar format with pointer assignment (eliminated 2 of 3 memcpy operations)
-- 🎵 **SIMD-optimized** - ARM NEON and x86_64 SSE2 for 4x performance
+- ✅ **VST3 support** (Windows, macOS, Linux) - complete with scanning, loading, processing, parameters, MIDI, and presets
+- ⚡ **Zero-copy audio processing** - planar format with pointer assignment (no memcpy in hot path)
+- 🎵 **SIMD-optimized** - ARM NEON and x86_64 SSE2 for 4x performance (AudioUnit)
 - 🎹 **Zero-allocation MIDI** - SmallVec-based MIDI for real-time performance
-- 🎛️ **GUI support** - AUv3, AUv2, and generic fallback UI
+- 🎛️ **GUI support** - AudioUnit: AUv3, AUv2, and generic fallback UI (VST3 GUI coming soon)
 - 🎚️ **Clean, safe API** - minimal unsafe code, comprehensive error handling
-- 🔌 **VST3 support** - planned
 - 🎼 **CLAP support** - planned
 - 🔄 **cpal integration** - optional audio I/O helpers
 - 🚀 **Zero-cost abstractions** - trait-based design
@@ -87,28 +88,38 @@ See [examples/simple_synth.rs](examples/simple_synth.rs) for a complete MIDI syn
 
 | Platform | AudioUnit | VST3 | CLAP | LV2 | Notes |
 |----------|-----------|------|------|-----|-------|
-| macOS    | ✅        | 🚧   | 🚧   | ❌  | Production-ready |
-| iOS      | ✅        | ❌   | ❌   | ❌  | Untested |
-| visionOS | ✅        | ❌   | ❌   | ❌  | Untested |
-| Windows  | ❌        | 🚧   | 🚧   | ❌  | |
-| Linux    | ❌        | 🚧   | 🚧   | 🚧  | |
+| macOS    | ✅        | ✅   | 🚧   | ❌  | Both AudioUnit and VST3 supported |
+| iOS      | ✅        | ❌   | ❌   | ❌  | Untested (AudioUnit only) |
+| visionOS | ✅        | ❌   | ❌   | ❌  | Untested (AudioUnit only) |
+| Windows  | ❌        | ✅   | 🚧   | ❌  | VST3 production-ready |
+| Linux    | ❌        | ✅   | 🚧   | 🚧  | VST3 production-ready |
 
 - ✅ Supported
 - 🚧 Planned
 - ❌ Not applicable
 
-**Apple Platform Notes:**
-- Discovers and loads AUv3 app extensions (iOS/visionOS) or AudioUnit plugins (macOS)
-- Full audio processing, parameters, MIDI, and presets support
-- GUI support: macOS uses AppKit (AUv3/AUv2/generic UI), iOS/visionOS use app extension GUIs
+**Platform-Specific Notes:**
+- **Apple platforms:** AudioUnit is the default and recommended format for best integration
+  - Discovers and loads AUv3 app extensions (iOS/visionOS) or AudioUnit plugins (macOS)
+  - GUI support: macOS uses AppKit (AUv3/AUv2/generic UI), iOS/visionOS use app extension GUIs
+  - VST3 also available on macOS for cross-platform compatibility
+- **Windows/Linux:** VST3 is the default format
+  - Standard VST3 plugin paths are scanned automatically
+  - Cross-platform plugin compatibility
 
 ## Examples
 
 Run the examples:
 
 ```bash
-# List all available plugins
+# List all available plugins (AudioUnit on macOS, VST3 on Windows/Linux)
 cargo run --example list_plugins
+
+# List VST3 plugins specifically
+cargo run --example list_vst3_plugins
+
+# Process audio with VST3
+cargo run --example vst3_processor
 
 # Control parameters
 cargo run --example control_parameters
@@ -119,7 +130,7 @@ cargo run --example simple_synth
 # Browse and load presets
 cargo run --example preset_browser
 
-# Plugin GUI (shows native plugin UI)
+# Plugin GUI (AudioUnit on macOS - shows native plugin UI)
 cargo run --example plugin_gui
 
 # Real-time audio host with CPAL (requires 'cpal' feature)
@@ -193,8 +204,18 @@ This allows different plugin formats to implement the same interface, making you
 - [x] Preset management (factory presets + state serialization)
 - [x] GUI hosting (AUv3/AUv2/generic fallback)
 
+### VST3 (Windows, macOS, Linux) - ✅ COMPLETE
+- [x] Plugin scanning and enumeration (automatic system path detection)
+- [x] Plugin loading and instantiation
+- [x] Audio processing with zero-copy planar audio
+- [x] Dynamic channel count support (mono/stereo/surround)
+- [x] Plugin state reset (clear buffers/delay lines)
+- [x] Parameter control
+- [x] MIDI support (zero-allocation, MIDI 1.0 channel messages)
+- [x] Preset management (factory presets + state serialization)
+- [ ] GUI hosting (planned)
+
 ### Future Formats
-- [ ] VST3 support (cross-platform)
 - [ ] CLAP support (cross-platform)
 - [ ] LV2 support (Linux)
 
@@ -209,10 +230,12 @@ This allows different plugin formats to implement the same interface, making you
 
 Contributions are welcome!
 
-**Completed**: AudioUnit hosting is production-ready (Phases 1-8 complete)
+**Completed**:
+- AudioUnit hosting is production-ready (Phases 1-8 complete)
+- VST3 hosting is production-ready (scanning, loading, processing, parameters, MIDI, presets)
 
 **Areas where help is needed**:
-- VST3 backend (scanner, loader, processor, GUI)
+- VST3 GUI hosting
 - CLAP backend (scanner, loader, processor, GUI)
 - Linux LV2 support
 - Advanced features (multi-threading, latency compensation, crash isolation)
@@ -233,6 +256,7 @@ at your option.
 
 - Inspired by [VCV Rack](https://vcvrack.com/) and the modular synthesis community
 - AudioUnit implementation uses Apple's AudioToolbox framework directly via C++ FFI
+- VST3 implementation uses the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) via C++ FFI
 - Thanks to the Rust audio community at [rust.audio](https://rust.audio)
 
 ## Why "Rack"?

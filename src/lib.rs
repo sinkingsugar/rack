@@ -38,16 +38,19 @@
 //! ## Features
 //!
 //! - **AudioUnit support** (macOS, iOS) - built-in
-//! - **VST3 support** - coming soon
+//! - **VST3 support** (Windows, macOS, Linux) - built-in
 //! - **CLAP support** - coming soon
 //! - **cpal integration** - optional, enable with `cpal` feature
 //!
 //! ## Platform Support
 //!
-//! AudioUnit hosting is available on macOS and iOS.
-//! - macOS: Full support including GUI
-//! - iOS: Core functionality (no GUI yet)
-//! VST3 and CLAP support will be cross-platform.
+//! - **macOS**: AudioUnit (default) and VST3
+//! - **iOS**: AudioUnit only (VST3 not available on mobile)
+//! - **Windows**: VST3 (default)
+//! - **Linux**: VST3 (default)
+//!
+//! AudioUnit provides the best integration on Apple platforms (native GUI support).
+//! VST3 is the default on Windows and Linux, and also available on macOS.
 
 pub mod error;
 pub mod midi;
@@ -64,9 +67,30 @@ pub use traits::{PluginInstance, PluginScanner};
 #[cfg(target_vendor = "apple")]
 pub mod au;
 
+// VST3 is available on desktop platforms (Windows, macOS, Linux)
+// Explicitly disabled on mobile platforms (iOS, tvOS, watchOS, visionOS)
+#[cfg(all(
+    not(target_os = "ios"),
+    not(target_os = "tvos"),
+    not(target_os = "watchos"),
+    not(target_os = "visionos")
+))]
+pub mod vst3;
+
 // Re-export the default scanner and plugin types for the platform
+// On Apple platforms, default to AudioUnit (better integration, GUI support)
 #[cfg(target_vendor = "apple")]
 pub use au::{AudioUnitGui, AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
+
+// On non-Apple desktop platforms, default to VST3
+#[cfg(all(
+    not(target_vendor = "apple"),
+    not(target_os = "ios"),
+    not(target_os = "tvos"),
+    not(target_os = "watchos"),
+    not(target_os = "visionos")
+))]
+pub use vst3::{Vst3Plugin as Plugin, Vst3Scanner as Scanner};
 
 /// Prelude module for convenient imports
 pub mod prelude {
@@ -75,6 +99,16 @@ pub mod prelude {
         PluginScanner, PluginType, PresetInfo, Result,
     };
 
+    // Platform-specific exports
     #[cfg(target_vendor = "apple")]
     pub use crate::{AudioUnitGui, Plugin, Scanner};
+
+    #[cfg(all(
+        not(target_vendor = "apple"),
+        not(target_os = "ios"),
+        not(target_os = "tvos"),
+        not(target_os = "watchos"),
+        not(target_os = "visionos")
+    ))]
+    pub use crate::{Plugin, Scanner};
 }
