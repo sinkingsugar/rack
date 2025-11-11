@@ -5,17 +5,77 @@ project(rack_sys VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Source files common to all Apple platforms
-set(RACK_SYS_SOURCES
-    src/rack_au.cpp
-    src/au_scanner.cpp
-    src/au_instance.cpp
-)
+# AudioUnit source files (Apple platforms only)
+set(RACK_AU_SOURCES)
+if(APPLE)
+    set(RACK_AU_SOURCES
+        src/rack_au.cpp
+        src/au_scanner.cpp
+        src/au_instance.cpp
+    )
+    # Add GUI sources only on macOS (requires AppKit)
+    # iOS and visionOS don't have AppKit
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
+        list(APPEND RACK_AU_SOURCES src/au_gui.mm)
+    endif()
+endif()
 
-# Add GUI sources only on macOS (requires AppKit)
-# iOS and visionOS don't have AppKit
-if(NOT CMAKE_SYSTEM_NAME MATCHES "iOS|visionOS")
-    list(APPEND RACK_SYS_SOURCES src/au_gui.mm)
+# Check if VST3 SDK is available
+# VST3 is only supported on desktop platforms (macOS, Linux, Windows)
+set(VST3_SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+set(HAVE_VST3_SDK FALSE)
+
+# VST3 is not supported on mobile platforms
+if(CMAKE_SYSTEM_NAME MATCHES "iOS|tvOS|watchOS|visionOS")
+    message(STATUS "VST3 disabled on ${CMAKE_SYSTEM_NAME} (desktop-only format)")
+elseif(EXISTS "${VST3_SDK_PATH}/CMakeLists.txt")
+    set(HAVE_VST3_SDK TRUE)
+    message(STATUS "VST3 SDK found at ${VST3_SDK_PATH}")
+else()
+    message(WARNING "VST3 SDK not found at ${VST3_SDK_PATH}")
+    message(WARNING "VST3 support will be disabled. To enable it:")
+    message(WARNING "  cd ${CMAKE_CURRENT_SOURCE_DIR} && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
+endif()
+
+# VST3 source files (cross-platform, only if SDK available)
+set(RACK_VST3_SOURCES)
+set(VST3_SDK_SOURCES)
+if(HAVE_VST3_SDK)
+    set(RACK_VST3_SOURCES
+        src/vst3_scanner.cpp
+        src/vst3_instance.cpp
+    )
+
+    # VST3 SDK hosting sources
+    set(VST3_SDK_SOURCES
+        external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/hostclasses.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/processdata.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/parameterchanges.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/eventlist.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/connectionproxy.cpp
+        external/vst3sdk/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+    )
+
+    # Platform-specific VST3 module loading
+    if(APPLE)
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_mac.mm)
+    elseif(WIN32)
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_win32.cpp)
+    else()
+        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_linux.cpp)
+    endif()
+endif()
+
+# Combine all sources
+set(RACK_SYS_SOURCES ${RACK_AU_SOURCES} ${RACK_VST3_SOURCES} ${VST3_SDK_SOURCES})
+
+# Validate that we have at least one plugin format
+if(NOT RACK_AU_SOURCES AND NOT RACK_VST3_SOURCES)
+    message(FATAL_ERROR "No plugin formats available! "
+        "On macOS/iOS, AudioUnit support should be automatic. "
+        "For VST3, clone the SDK: git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
 endif()
 
 # Build as static library for easy linking with Rust
@@ -25,6 +85,13 @@ add_library(rack_sys STATIC ${RACK_SYS_SOURCES})
 target_include_directories(rack_sys PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Add VST3 SDK include directory if available
+if(HAVE_VST3_SDK)
+    target_include_directories(rack_sys PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk
+    )
+endif()
 
 # Apple platform-specific settings
 if(APPLE)
@@ -50,6 +117,11 @@ if(APPLE)
     # Enable ARC (Automatic Reference Counting) for Objective-C++
     # Required for au_gui.mm on macOS
     target_compile_options(rack_sys PRIVATE -fobjc-arc)
+endif()
+
+# Linux platform-specific settings (for VST3)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(rack_sys PUBLIC ${CMAKE_DL_LIBS})
 endif()
 
 # Compiler warnings
