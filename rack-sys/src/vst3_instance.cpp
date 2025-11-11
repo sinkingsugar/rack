@@ -180,21 +180,34 @@ public:
     }
 
     tresult PLUGIN_API seek(int64 pos, int32 mode, int64* result) override {
+        // Calculate new position as int64 to prevent overflow/truncation
+        int64 new_position = position_;
+
         switch (mode) {
             case kIBSeekSet:
-                position_ = static_cast<int32>(pos);
+                new_position = pos;
                 break;
             case kIBSeekCur:
-                position_ += static_cast<int32>(pos);
+                new_position = static_cast<int64>(position_) + pos;
                 break;
             case kIBSeekEnd:
-                position_ = static_cast<int32>(buffer_.size()) + static_cast<int32>(pos);
+                new_position = static_cast<int64>(buffer_.size()) + pos;
                 break;
             default:
                 return kInvalidArgument;
         }
 
-        position_ = std::max(0, std::min(position_, static_cast<int32>(buffer_.size())));
+        // Clamp to valid range [0, buffer_size]
+        if (new_position < 0) {
+            new_position = 0;
+        }
+        int64 buffer_size = static_cast<int64>(buffer_.size());
+        if (new_position > buffer_size) {
+            new_position = buffer_size;
+        }
+
+        // Safe to cast after clamping
+        position_ = static_cast<int32>(new_position);
 
         if (result) {
             *result = position_;
@@ -338,6 +351,11 @@ RackVST3Plugin* rack_vst3_plugin_new(const char* path, const char* uid) {
 
     // Initialize component
     if (plugin->component->initialize(FUnknownPtr<IHostApplication>(new HostApplication())) != kResultOk) {
+        // Component creation succeeded but initialization failed - no need to terminate
+        // IPtr will automatically release when plugin is deleted
+        plugin->component = nullptr;
+        plugin->processor = nullptr;
+        plugin->module = nullptr;
         delete plugin;
         return nullptr;
     }
@@ -350,7 +368,17 @@ RackVST3Plugin* rack_vst3_plugin_new(const char* path, const char* uid) {
 
         plugin->controller = factory.createInstance<IEditController>(controllerUID);
         if (plugin->controller) {
-            plugin->controller->initialize(FUnknownPtr<IHostApplication>(new HostApplication()));
+            // Initialize controller - if this fails, clean up properly
+            if (plugin->controller->initialize(FUnknownPtr<IHostApplication>(new HostApplication())) != kResultOk) {
+                // Controller init failed - terminate component and clean up
+                plugin->component->terminate();
+                plugin->controller = nullptr;
+                plugin->component = nullptr;
+                plugin->processor = nullptr;
+                plugin->module = nullptr;
+                delete plugin;
+                return nullptr;
+            }
         }
     } else {
         // Component is also the controller (single component architecture)
@@ -1032,8 +1060,18 @@ int rack_vst3_plugin_send_midi(
     const RackVST3MidiEvent* events,
     uint32_t event_count)
 {
-    if (!plugin || !events) {
+    if (!plugin || !plugin->initialized) {
+        return RACK_VST3_ERROR_NOT_INITIALIZED;
+    }
+
+    // Null events array is only valid if event_count is 0
+    if (!events && event_count > 0) {
         return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
+    // Early return for zero events (valid - nothing to do)
+    if (event_count == 0) {
+        return RACK_VST3_OK;
     }
 
     // Convert MIDI events to VST3 events
