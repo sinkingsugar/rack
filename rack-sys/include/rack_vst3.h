@@ -216,8 +216,14 @@ int rack_vst3_plugin_get_preset_info(
 int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number);
 
 // Get plugin state size (for allocation)
-// Returns size in bytes needed to store state, or 0 if state cannot be retrieved
-// Thread-safety: Read-only after initialization. Safe to call from any thread.
+// Returns actual size in bytes needed to store state, or 0 if state cannot be retrieved
+//
+// NOTE: This function determines the actual state size by serializing the state.
+//       It is not a constant or estimate - it queries the plugin's current state.
+//       For large plugins (samplers, complex synths), this may take some time.
+//       The returned size is accurate for immediate use with get_state().
+//
+// Thread-safety: Should be called from the same thread that owns the plugin instance.
 int rack_vst3_plugin_get_state_size(RackVST3Plugin* plugin);
 
 // Get plugin state (full state including parameters, preset, etc.)

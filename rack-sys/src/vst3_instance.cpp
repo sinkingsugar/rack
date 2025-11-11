@@ -945,9 +945,48 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
 }
 
 int rack_vst3_plugin_get_state_size(RackVST3Plugin* plugin) {
-    // VST3 state size is not known in advance
-    // Return a reasonable maximum
-    return 1024 * 1024;  // 1 MB max
+    if (!plugin || !plugin->component) {
+        return 0;
+    }
+
+    // VST3 doesn't provide a query method for state size
+    // We need to actually serialize the state to determine the size
+    // This is done once for buffer allocation - worth the cost for accuracy
+
+    // Create temporary memory stream for size calculation
+    IPtr<MemoryStream> stream(new MemoryStream(), false);
+
+    // Reserve space for component state size marker
+    uint32_t size_marker_placeholder = 0;
+    stream->write(&size_marker_placeholder, sizeof(size_marker_placeholder), nullptr);
+
+    // Record position before component state
+    int64 component_start_pos = 0;
+    stream->tell(&component_start_pos);
+
+    // Get component state
+    tresult result = plugin->component->getState(stream);
+    if (result != kResultOk) {
+        // State serialization failed - return a safe default
+        return 1024 * 1024;  // 1MB fallback
+    }
+
+    // Record position after component state
+    int64 component_end_pos = 0;
+    stream->tell(&component_end_pos);
+
+    // Get controller state if separate controller
+    if (plugin->controller && reinterpret_cast<void*>(plugin->controller.get()) != reinterpret_cast<void*>(plugin->component.get())) {
+        result = plugin->controller->getState(stream);
+        if (result != kResultOk) {
+            // Controller state failed - return component state size only
+            return static_cast<int>(stream->getSize());
+        }
+    }
+
+    // Return actual state size
+    // This avoids the retry pattern - user gets correct size on first call
+    return static_cast<int>(stream->getSize());
 }
 
 int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* size) {
@@ -999,8 +1038,8 @@ int rack_vst3_plugin_get_state(RackVST3Plugin* plugin, uint8_t* data, size_t* si
 
     // Copy to output buffer
     // Note: MemoryStream grows dynamically - no fixed limit, can't overflow
-    // The 1MB from get_state_size() is just a hint for buffer allocation
-    // Here we check if the ACTUAL state fits in the caller's buffer
+    // get_state_size() returns the actual size, so this should match
+    // However, we still check in case the state changed between calls
     size_t state_size = stream->getSize();
     if (state_size > *size) {
         *size = state_size;  // Return required size for caller to retry
