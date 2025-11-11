@@ -2,9 +2,9 @@
 
 **A modern Rust library for hosting audio plugins**
 
-> **Status:** AudioUnit support is **production-ready** on macOS (Phases 1-8 complete).
-> VST3 support is **production-ready** on Windows, macOS, and Linux.
-> iOS and visionOS are supported (untested). The API is stabilizing. CLAP support is planned.
+> **Status:** AudioUnit support is **production-ready** on macOS (Phases 1-8 complete, thoroughly tested).
+> VST3 support is **working on macOS**, untested on Windows/Linux (no CI yet).
+> iOS and visionOS are supported but untested. The API is stabilizing. CLAP support is planned.
 
 [![Crates.io](https://img.shields.io/crates/v/rack.svg)](https://crates.io/crates/rack)
 [![Documentation](https://docs.rs/rack/badge.svg)](https://docs.rs/rack)
@@ -14,8 +14,8 @@ Rack is a cross-platform library for discovering, loading, and processing audio 
 
 ## Features
 
-- ✅ **AudioUnit support** (macOS, iOS, visionOS) - complete with scanning, loading, processing, parameters, MIDI, presets, and GUI
-- ✅ **VST3 support** (Windows, macOS, Linux) - complete with scanning, loading, processing, parameters, MIDI, and presets
+- ✅ **AudioUnit support** (macOS, iOS, visionOS) - production-ready with scanning, loading, processing, parameters, MIDI, presets, and GUI
+- 🚧 **VST3 support** (macOS tested, Windows/Linux untested) - scanning, loading, processing, parameters, MIDI, and presets
 - ⚡ **Zero-copy audio processing** - planar format with pointer assignment (no memcpy in hot path)
 - 🎵 **SIMD-optimized** - ARM NEON and x86_64 SSE2 for 4x performance (AudioUnit)
 - 🎹 **Zero-allocation MIDI** - SmallVec-based MIDI for real-time performance
@@ -88,24 +88,28 @@ See [examples/simple_synth.rs](examples/simple_synth.rs) for a complete MIDI syn
 
 | Platform | AudioUnit | VST3 | CLAP | LV2 | Notes |
 |----------|-----------|------|------|-----|-------|
-| macOS    | ✅        | ✅   | 🚧   | ❌  | Both AudioUnit and VST3 supported |
-| iOS      | ✅        | ❌   | ❌   | ❌  | Untested (AudioUnit only) |
-| visionOS | ✅        | ❌   | ❌   | ❌  | Untested (AudioUnit only) |
-| Windows  | ❌        | ✅   | 🚧   | ❌  | VST3 production-ready |
-| Linux    | ❌        | ✅   | 🚧   | 🚧  | VST3 production-ready |
+| macOS    | ✅        | 🧪   | 🚧   | ❌  | AudioUnit production-ready, VST3 tested & working |
+| iOS      | 🧪        | ❌   | ❌   | ❌  | AudioUnit compiles, untested |
+| visionOS | 🧪        | ❌   | ❌   | ❌  | AudioUnit compiles, untested |
+| Windows  | ❌        | 🧪   | 🚧   | ❌  | VST3 compiles, untested (no CI) |
+| Linux    | ❌        | 🧪   | 🚧   | 🧪  | VST3 compiles, untested (no CI) |
 
-- ✅ Supported
+- ✅ Production-ready (tested)
+- 🧪 Experimental (compiles, may work, untested)
 - 🚧 Planned
 - ❌ Not applicable
 
 **Platform-Specific Notes:**
-- **Apple platforms:** AudioUnit is the default and recommended format for best integration
-  - Discovers and loads AUv3 app extensions (iOS/visionOS) or AudioUnit plugins (macOS)
-  - GUI support: macOS uses AppKit (AUv3/AUv2/generic UI), iOS/visionOS use app extension GUIs
-  - VST3 also available on macOS for cross-platform compatibility
-- **Windows/Linux:** VST3 is the default format
+- **Apple platforms (macOS):** AudioUnit is the default and recommended format
+  - Production-ready: thoroughly tested, SIMD-optimized, with GUI support
+  - Discovers and loads AUv3 app extensions or AudioUnit plugins
+  - GUI support: AppKit-based (AUv3/AUv2/generic fallback)
+  - VST3 also available on macOS (tested & working, but no GUI yet)
+- **Windows/Linux:** VST3 support is experimental
+  - Code compiles and follows VST3 SDK patterns
+  - ⚠️ NOT tested on Windows or Linux (no CI infrastructure yet)
   - Standard VST3 plugin paths are scanned automatically
-  - Cross-platform plugin compatibility
+  - Help wanted: testing, CI setup, bug reports
 
 ## Examples
 
@@ -204,15 +208,16 @@ This allows different plugin formats to implement the same interface, making you
 - [x] Preset management (factory presets + state serialization)
 - [x] GUI hosting (AUv3/AUv2/generic fallback)
 
-### VST3 (Windows, macOS, Linux) - ✅ COMPLETE
+### VST3 (macOS tested, Windows/Linux untested) - 🧪 EXPERIMENTAL
 - [x] Plugin scanning and enumeration (automatic system path detection)
 - [x] Plugin loading and instantiation
 - [x] Audio processing with zero-copy planar audio
 - [x] Dynamic channel count support (mono/stereo/surround)
 - [x] Plugin state reset (clear buffers/delay lines)
-- [x] Parameter control
+- [x] Parameter control with validation
 - [x] MIDI support (zero-allocation, MIDI 1.0 channel messages)
 - [x] Preset management (factory presets + state serialization)
+- [ ] Windows/Linux testing (no CI yet)
 - [ ] GUI hosting (planned)
 
 ### Future Formats
@@ -230,18 +235,24 @@ This allows different plugin formats to implement the same interface, making you
 
 Contributions are welcome!
 
-**Completed**:
-- AudioUnit hosting is production-ready (Phases 1-8 complete)
-- VST3 hosting is production-ready (scanning, loading, processing, parameters, MIDI, presets)
+**Production-Ready**:
+- AudioUnit hosting on macOS (Phases 1-8 complete, thoroughly tested)
 
-**Areas where help is needed**:
-- VST3 GUI hosting
-- CLAP backend (scanner, loader, processor, GUI)
+**Experimental** (compiles, needs testing):
+- VST3 on macOS (tested & working)
+- VST3 on Windows/Linux (untested, no CI)
+
+**High Priority - Help Needed**:
+- 🔴 **Windows/Linux VST3 testing** - verify it actually works!
+- 🔴 **CI infrastructure** - Windows and Linux builds/tests
+- 🟡 VST3 GUI hosting
+- 🟡 CLAP backend (scanner, loader, processor, GUI)
+
+**Lower Priority**:
 - Linux LV2 support
 - Advanced features (multi-threading, latency compensation, crash isolation)
 - Documentation improvements
 - Additional examples
-- Cross-platform testing
 
 ## License
 
