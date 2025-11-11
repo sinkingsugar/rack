@@ -833,23 +833,32 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
             // Explicitly marked as program change - always use
             is_program_param = true;
         } else {
-            // Check for specific keywords as complete words
-            size_t pos = 0;
-            while ((pos = param_title.find_first_of("programpatchpreset", pos)) != std::string::npos) {
-                // Check if it's a word boundary
-                bool start_ok = (pos == 0 || !std::isalnum(param_title[pos - 1]));
-                size_t len = 0;
-                if (param_title.substr(pos, 7) == "program") len = 7;
-                else if (param_title.substr(pos, 5) == "patch") len = 5;
-                else if (param_title.substr(pos, 6) == "preset") len = 6;
-                else { pos++; continue; }
+            // Check for specific keywords as complete words with word boundaries
+            // We need to search for each keyword separately, not use find_first_of
+            const char* keywords[] = {"program", "preset", "patch"};
+            const size_t keyword_lengths[] = {7, 6, 5};
 
-                bool end_ok = (pos + len >= param_title.length() || !std::isalnum(param_title[pos + len]));
-                if (start_ok && end_ok) {
-                    is_program_param = true;
-                    break;
+            for (size_t k = 0; k < 3; ++k) {
+                const char* keyword = keywords[k];
+                size_t keyword_len = keyword_lengths[k];
+                size_t pos = 0;
+
+                while ((pos = param_title.find(keyword, pos)) != std::string::npos) {
+                    // Check word boundaries
+                    bool start_ok = (pos == 0 || !std::isalnum(param_title[pos - 1]));
+                    bool end_ok = (pos + keyword_len >= param_title.length() ||
+                                  !std::isalnum(param_title[pos + keyword_len]));
+
+                    if (start_ok && end_ok) {
+                        is_program_param = true;
+                        break;
+                    }
+                    pos++;
                 }
-                pos += len;
+
+                if (is_program_param) {
+                    break; // Found a match, stop searching
+                }
             }
         }
 
