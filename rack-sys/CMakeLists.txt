@@ -48,12 +48,10 @@ if(HAVE_VST3_SDK)
 
     # VST3 SDK base sources (required for FUID, FUnknown, etc.)
     set(VST3_SDK_SOURCES
-        # Base library
+        # Base library - provides FUID, FUnknown, interface IIDs
         external/vst3sdk/public.sdk/source/common/commoniids.cpp
         external/vst3sdk/pluginterfaces/base/funknown.cpp
         external/vst3sdk/pluginterfaces/base/coreiids.cpp
-        # VST3 interface IIDs
-        external/vst3sdk/pluginterfaces/vst/vstiids.cpp
         # String conversion utilities
         external/vst3sdk/public.sdk/source/vst/vstinitiids.cpp
         # Hosting sources
