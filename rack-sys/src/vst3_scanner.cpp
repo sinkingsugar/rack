@@ -11,12 +11,16 @@
 
 #if defined(__APPLE__)
     #include <CoreFoundation/CoreFoundation.h>
+    #include <dirent.h>
+    #include <sys/stat.h>
 #elif defined(_WIN32)
     #include <windows.h>
     #include <shlobj.h>
 #else
     #include <unistd.h>
     #include <pwd.h>
+    #include <dirent.h>
+    #include <sys/stat.h>
 #endif
 
 using namespace VST3;
@@ -27,6 +31,60 @@ using namespace Steinberg::Vst;
 struct RackVST3Scanner {
     std::vector<std::string> search_paths;
 };
+
+// Helper: Scan a directory for .vst3 bundles/folders
+// Returns list of full paths to .vst3 bundles found
+static std::vector<std::string> scan_directory_for_vst3(const std::string& dir_path) {
+    std::vector<std::string> vst3_paths;
+
+#if defined(_WIN32)
+    // Windows implementation
+    std::string search_path = dir_path + "\\*.vst3";
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle = FindFirstFileA(search_path.c_str(), &find_data);
+
+    if (find_handle != INVALID_HANDLE_VALUE) {
+        do {
+            if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                std::string full_path = dir_path + "\\" + find_data.cFileName;
+                vst3_paths.push_back(full_path);
+            }
+        } while (FindNextFileA(find_handle, &find_data));
+        FindClose(find_handle);
+    }
+#else
+    // macOS/Linux implementation using dirent
+    DIR* dir = opendir(dir_path.c_str());
+    if (!dir) {
+        return vst3_paths;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string name = entry->d_name;
+
+        // Skip . and ..
+        if (name == "." || name == "..") {
+            continue;
+        }
+
+        // Check for .vst3 extension
+        if (name.length() > 5 && name.substr(name.length() - 5) == ".vst3") {
+            std::string full_path = dir_path + "/" + name;
+
+            // Verify it's a directory (VST3 bundles are folders on macOS/Linux)
+            struct stat st;
+            if (stat(full_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                vst3_paths.push_back(full_path);
+            }
+        }
+    }
+
+    closedir(dir);
+#endif
+
+    return vst3_paths;
+}
 
 // Helper: Get default VST3 plugin paths for the current platform
 static std::vector<std::string> get_default_vst3_paths() {
@@ -125,22 +183,29 @@ int rack_vst3_scanner_scan(RackVST3Scanner* scanner, RackVST3PluginInfo* plugins
     bool count_only = (plugins == nullptr);
     size_t count = 0;
 
-    // If no paths added, use default paths
+    // Determine which paths to scan
     std::vector<std::string> paths_to_scan = scanner->search_paths;
     if (paths_to_scan.empty()) {
+        // No custom paths - use system defaults
         paths_to_scan = get_default_vst3_paths();
     }
 
-    // Collect all module paths
-    // Note: VST3 SDK's getModulePaths() only returns system-wide default paths
-    // For custom paths, we currently use the system paths only
-    // TODO: Implement manual .vst3 bundle scanning for custom directories
-    auto module_paths = Hosting::Module::getModulePaths();
+    // Collect all module paths by scanning directories for .vst3 bundles
+    std::vector<std::string> module_paths;
 
-    // Custom path scanning not yet fully implemented
-    // VST3::Hosting::Module::getModulePaths() doesn't accept custom paths
-    // Would need to manually scan directories for .vst3 bundles/folders
-    (void)paths_to_scan;  // Suppress unused warning for now
+    for (const auto& search_path : paths_to_scan) {
+        auto found_bundles = scan_directory_for_vst3(search_path);
+        module_paths.insert(module_paths.end(), found_bundles.begin(), found_bundles.end());
+    }
+
+    // Also include system-discovered modules (from getModulePaths)
+    // This ensures we find all plugins even if custom paths are specified
+    auto system_modules = Hosting::Module::getModulePaths();
+    module_paths.insert(module_paths.end(), system_modules.begin(), system_modules.end());
+
+    // Remove duplicates (in case same plugin is in both custom and system paths)
+    std::sort(module_paths.begin(), module_paths.end());
+    module_paths.erase(std::unique(module_paths.begin(), module_paths.end()), module_paths.end());
 
     // Scan all found modules
     for (const auto& module_path : module_paths) {
@@ -208,13 +273,22 @@ int rack_vst3_scanner_scan(RackVST3Scanner* scanner, RackVST3PluginInfo* plugins
                 // Try to parse up to 4 components
                 int parsed = sscanf(version_str.c_str(), "%d.%d.%d.%d", &major, &minor, &patch, &build);
                 if (parsed >= 1) {
+                    // Clamp each component to valid byte range [0, 255]
+                    // This prevents integer overflow and handles negative/oversized values
+                    auto clamp_byte = [](int val) -> uint8_t {
+                        return static_cast<uint8_t>(std::max(0, std::min(255, val)));
+                    };
+
+                    uint8_t major_byte = clamp_byte(major);
+                    uint8_t minor_byte = clamp_byte(minor);
+                    uint8_t patch_byte = clamp_byte(patch);
+                    uint8_t build_byte = clamp_byte(build);
+
                     // Pack into uint32_t: major(8) | minor(8) | patch(8) | build(8)
-                    version = static_cast<uint32_t>(
-                        ((major & 0xFF) << 24) |
-                        ((minor & 0xFF) << 16) |
-                        ((patch & 0xFF) << 8) |
-                        (build & 0xFF)
-                    );
+                    version = (static_cast<uint32_t>(major_byte) << 24) |
+                             (static_cast<uint32_t>(minor_byte) << 16) |
+                             (static_cast<uint32_t>(patch_byte) << 8) |
+                             static_cast<uint32_t>(build_byte);
                 }
             }
             info.version = version;

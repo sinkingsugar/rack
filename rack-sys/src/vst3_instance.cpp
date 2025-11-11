@@ -29,46 +29,73 @@ static std::mutex g_vst3_lifecycle_mutex;
 
 // Helper: Convert UTF-16 to UTF-8
 // VST3 uses char16 (UTF-16) for strings
+// Handles surrogate pairs and malformed input safely
 static std::string utf16_to_utf8(const char16* utf16_str) {
     if (!utf16_str) {
         return "";
     }
 
     std::string result;
-    result.reserve(128); // Reserve reasonable space
+    result.reserve(128);
 
-    while (*utf16_str) {
+    // Safety limit to prevent infinite loops on corrupted data
+    // VST3 spec limits plugin names to 256 chars
+    const size_t MAX_STRING_LENGTH = 4096;
+    size_t processed = 0;
+
+    while (*utf16_str && processed < MAX_STRING_LENGTH) {
         char16 c = *utf16_str++;
+        processed++;
 
-        // Handle UTF-16 to UTF-8 conversion
+        // UTF-16 to UTF-8 conversion with complete error handling
         if (c < 0x80) {
-            // ASCII - 1 byte
+            // U+0000 to U+007F: ASCII range (1 byte in UTF-8)
             result.push_back(static_cast<char>(c));
-        } else if (c < 0x800) {
-            // 2 bytes
+        }
+        else if (c < 0x800) {
+            // U+0080 to U+07FF: 2 bytes in UTF-8
             result.push_back(static_cast<char>(0xC0 | (c >> 6)));
             result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-        } else if (c >= 0xD800 && c <= 0xDBFF) {
-            // High surrogate - need to read low surrogate
-            // CRITICAL: Check for null terminator BEFORE reading next character
-            if (*utf16_str != 0 && *utf16_str >= 0xDC00 && *utf16_str <= 0xDFFF) {
-                // Valid surrogate pair
-                uint32_t codepoint = 0x10000 + ((c & 0x3FF) << 10) + (*utf16_str++ & 0x3FF);
-                // 4 bytes
+        }
+        else if (c >= 0xD800 && c <= 0xDBFF) {
+            // High surrogate (U+D800 to U+DBFF): Start of surrogate pair
+            // Must be followed by low surrogate to form valid codepoint
+
+            // Safety check: Ensure we haven't reached end of string
+            if (*utf16_str == 0) {
+                // Malformed: High surrogate at end of string
+                result.append("\xEF\xBF\xBD"); // UTF-8 replacement character U+FFFD
+                break;
+            }
+
+            char16 low = *utf16_str;
+
+            // Validate low surrogate range (U+DC00 to U+DFFF)
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                // Valid surrogate pair - decode to codepoint U+10000 to U+10FFFF
+                utf16_str++;
+                processed++;
+
+                uint32_t high_bits = (c & 0x3FF);      // 10 bits from high surrogate
+                uint32_t low_bits = (low & 0x3FF);     // 10 bits from low surrogate
+                uint32_t codepoint = 0x10000 + (high_bits << 10) + low_bits;
+
+                // Encode as 4-byte UTF-8 sequence
                 result.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
                 result.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
                 result.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
                 result.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
             } else {
-                // Invalid surrogate pair or string ends with high surrogate
-                // Replace with replacement character
-                result.push_back('?');
+                // Malformed: High surrogate not followed by low surrogate
+                result.append("\xEF\xBF\xBD"); // UTF-8 replacement character U+FFFD
             }
-        } else if (c >= 0xDC00 && c <= 0xDFFF) {
-            // Low surrogate without high surrogate - invalid
-            result.push_back('?');
-        } else {
-            // 3 bytes
+        }
+        else if (c >= 0xDC00 && c <= 0xDFFF) {
+            // Malformed: Low surrogate (U+DC00 to U+DFFF) without preceding high surrogate
+            result.append("\xEF\xBF\xBD"); // UTF-8 replacement character U+FFFD
+        }
+        else {
+            // U+0800 to U+FFFF (excluding surrogates): 3 bytes in UTF-8
             result.push_back(static_cast<char>(0xE0 | (c >> 12)));
             result.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
             result.push_back(static_cast<char>(0x80 | (c & 0x3F)));
@@ -383,7 +410,7 @@ int rack_vst3_plugin_initialize(RackVST3Plugin* plugin, double sample_rate, uint
     plugin->sample_rate = sample_rate;
     plugin->max_block_size = max_block_size;
 
-    // Setup processing (stereo for now - TODO: make configurable)
+    // Setup processing with 32-bit float samples in realtime mode
     ProcessSetup setup;
     setup.processMode = kRealtime;
     setup.symbolicSampleSize = kSample32;
@@ -543,18 +570,26 @@ int rack_vst3_plugin_process(
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
+    // Validate buffer pointers when channel counts > 0
+    if (num_input_channels > 0 && !inputs) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+    if (num_output_channels > 0 && !outputs) {
+        return RACK_VST3_ERROR_INVALID_PARAM;
+    }
+
     // Update dynamic fields only (prepare() was called during initialization)
     plugin->process_data.numSamples = frames;
 
     // Set input buffers
-    if (num_input_channels > 0 && inputs) {
+    if (num_input_channels > 0) {
         AudioBusBuffers& bus = plugin->process_data.inputs[0];
         bus.numChannels = num_input_channels;
         bus.channelBuffers32 = const_cast<float**>(inputs);
     }
 
     // Set output buffers
-    if (num_output_channels > 0 && outputs) {
+    if (num_output_channels > 0) {
         AudioBusBuffers& bus = plugin->process_data.outputs[0];
         bus.numChannels = num_output_channels;
         bus.channelBuffers32 = const_cast<float**>(outputs);
@@ -756,6 +791,7 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
 
     // Fallback 1: Try to find and set a "program" parameter
     // Some plugins expose preset selection as a regular parameter
+    // Only use discrete/list parameters to avoid false positives
     int32 param_count = plugin->controller->getParameterCount();
     for (int32 i = 0; i < param_count; i++) {
         Vst::ParameterInfo param_info;
@@ -763,35 +799,57 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
             continue;
         }
 
+        // Only consider discrete parameters (stepCount > 0) or parameters with kIsProgramChange flag
+        bool is_discrete = param_info.stepCount > 0;
+        bool is_program_change = (param_info.flags & ParameterInfo::kIsProgramChange) != 0;
+
+        if (!is_discrete && !is_program_change) {
+            continue; // Skip continuous parameters without program change flag
+        }
+
         // Convert parameter title to UTF-8 and lowercase for comparison
         std::string param_title = utf16_to_utf8(param_info.title);
         std::transform(param_title.begin(), param_title.end(), param_title.begin(),
                       [](unsigned char c) { return std::tolower(c); });
 
-        // Check if this looks like a program/preset selector parameter
-        if (param_title.find("program") != std::string::npos ||
-            param_title.find("preset") != std::string::npos ||
-            param_title.find("patch") != std::string::npos) {
+        // More specific matching to reduce false positives:
+        // - Must be discrete or marked as program change
+        // - Title must contain complete words "program", "preset", or "patch"
+        // - Check for word boundaries to avoid matching "programming", "unpresettable", etc.
+        bool is_program_param = false;
+        if (is_program_change) {
+            // Explicitly marked as program change - always use
+            is_program_param = true;
+        } else {
+            // Check for specific keywords as complete words
+            size_t pos = 0;
+            while ((pos = param_title.find_first_of("programpatchpreset", pos)) != std::string::npos) {
+                // Check if it's a word boundary
+                bool start_ok = (pos == 0 || !std::isalnum(param_title[pos - 1]));
+                size_t len = 0;
+                if (param_title.substr(pos, 7) == "program") len = 7;
+                else if (param_title.substr(pos, 5) == "patch") len = 5;
+                else if (param_title.substr(pos, 6) == "preset") len = 6;
+                else { pos++; continue; }
 
-            // Try to set this parameter to select the preset
-            // VST3 parameters are normalized 0.0-1.0
-            // We need to map program_index to this range
-            float normalized_value;
-
-            if (param_info.stepCount > 0) {
-                // Discrete parameter (e.g., 0-127 for MIDI programs)
-                // Ensure program_index is within range
-                if (preset.program_index <= param_info.stepCount) {
-                    normalized_value = static_cast<float>(preset.program_index) /
-                                      static_cast<float>(param_info.stepCount);
-                } else {
-                    continue; // This parameter doesn't have enough steps
+                bool end_ok = (pos + len >= param_title.length() || !std::isalnum(param_title[pos + len]));
+                if (start_ok && end_ok) {
+                    is_program_param = true;
+                    break;
                 }
-            } else {
-                // Continuous parameter - assume program_index maps directly
-                // This is speculative but worth trying
-                normalized_value = static_cast<float>(preset.program_index) / 127.0f;
+                pos += len;
             }
+        }
+
+        if (is_program_param) {
+            // Verify program_index is within valid range
+            if (preset.program_index > param_info.stepCount) {
+                continue; // Index out of range for this parameter
+            }
+
+            // Map program_index to normalized value
+            float normalized_value = static_cast<float>(preset.program_index) /
+                                    static_cast<float>(param_info.stepCount);
 
             // Clamp to 0.0-1.0 range
             normalized_value = std::max(0.0f, std::min(1.0f, normalized_value));
@@ -807,7 +865,7 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
                     queue->addPoint(0, normalized_value, point_index);
                 }
 
-                // Consider this a success (best effort)
+                // Successfully loaded via parameter-based fallback
                 return RACK_VST3_OK;
             }
         }
