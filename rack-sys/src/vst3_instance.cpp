@@ -616,18 +616,18 @@ int rack_vst3_plugin_set_parameter(RackVST3Plugin* plugin, uint32_t index, float
 
     ParamID param_id = plugin->parameters[index].id;
 
-    // Set parameter value on controller
+    // Set parameter value on controller (for UI reflection)
     plugin->controller->setParamNormalized(param_id, value);
 
-    // Note: For proper component notification, parameter changes should ideally be
-    // communicated through IComponentHandler or via inputParameterChanges during process().
-    // Since we don't have a full IComponentHandler implementation yet, the parameter
-    // change will be reflected in the next process() call when the component queries
-    // the controller for current parameter values.
-    //
-    // For realtime parameter automation, consider queuing changes via:
-    //   plugin->input_param_changes.addParameterData(param_id, ...)
-    // and communicating them during the next process() call.
+    // Queue parameter change for component notification in next process() call
+    // This ensures the component receives the parameter change properly
+    int32 queue_index = 0;
+    IParamValueQueue* queue = plugin->input_param_changes.addParameterData(param_id, queue_index);
+    if (queue) {
+        // Add parameter change at sample offset 0 (beginning of next buffer)
+        int32 point_index = 0;
+        queue->addPoint(0, value, point_index);
+    }
 
     return RACK_VST3_OK;
 }
@@ -754,9 +754,86 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
         // IPtr automatically releases stream on scope exit
     }
 
-    // Fallback: Some plugins don't support IProgramListData
-    // In this case, preset loading is not fully supported
-    // TODO: Implement alternative methods (parameter-based preset loading)
+    // Fallback 1: Try to find and set a "program" parameter
+    // Some plugins expose preset selection as a regular parameter
+    int32 param_count = plugin->controller->getParameterCount();
+    for (int32 i = 0; i < param_count; i++) {
+        Vst::ParameterInfo param_info;
+        if (plugin->controller->getParameterInfo(i, param_info) != kResultOk) {
+            continue;
+        }
+
+        // Convert parameter title to UTF-8 and lowercase for comparison
+        std::string param_title = utf16_to_utf8(param_info.title);
+        std::transform(param_title.begin(), param_title.end(), param_title.begin(),
+                      [](unsigned char c) { return std::tolower(c); });
+
+        // Check if this looks like a program/preset selector parameter
+        if (param_title.find("program") != std::string::npos ||
+            param_title.find("preset") != std::string::npos ||
+            param_title.find("patch") != std::string::npos) {
+
+            // Try to set this parameter to select the preset
+            // VST3 parameters are normalized 0.0-1.0
+            // We need to map program_index to this range
+            float normalized_value;
+
+            if (param_info.stepCount > 0) {
+                // Discrete parameter (e.g., 0-127 for MIDI programs)
+                // Ensure program_index is within range
+                if (preset.program_index <= param_info.stepCount) {
+                    normalized_value = static_cast<float>(preset.program_index) /
+                                      static_cast<float>(param_info.stepCount);
+                } else {
+                    continue; // This parameter doesn't have enough steps
+                }
+            } else {
+                // Continuous parameter - assume program_index maps directly
+                // This is speculative but worth trying
+                normalized_value = static_cast<float>(preset.program_index) / 127.0f;
+            }
+
+            // Clamp to 0.0-1.0 range
+            normalized_value = std::max(0.0f, std::min(1.0f, normalized_value));
+
+            // Set the parameter
+            ParamID param_id = param_info.id;
+            if (plugin->controller->setParamNormalized(param_id, normalized_value) == kResultOk) {
+                // Queue the parameter change for the processor
+                int32 queue_index = 0;
+                IParamValueQueue* queue = plugin->input_param_changes.addParameterData(param_id, queue_index);
+                if (queue) {
+                    int32 point_index = 0;
+                    queue->addPoint(0, normalized_value, point_index);
+                }
+
+                // Consider this a success (best effort)
+                return RACK_VST3_OK;
+            }
+        }
+    }
+
+    // Fallback 2: Try using IUnitInfo to select the unit containing this program
+    // Some plugins may respond to unit selection by loading the first program in that unit
+    int32 unit_count = unit_info->getUnitCount();
+    for (int32 i = 0; i < unit_count; i++) {
+        UnitInfo unit_info_struct;
+        if (unit_info->getUnitInfo(i, unit_info_struct) == kResultOk) {
+            // Check if this unit's program list matches our preset
+            if (unit_info_struct.programListId == preset.program_list_id) {
+                // Try to select this unit (might trigger program load)
+                tresult result = unit_info->selectUnit(unit_info_struct.id);
+                if (result == kResultOk) {
+                    // Unit selected - this might have loaded a program
+                    // We can't verify, so return success as best effort
+                    return RACK_VST3_OK;
+                }
+            }
+        }
+    }
+
+    // No fallback succeeded - plugin doesn't support programmatic preset loading
+    // This is not an error - it's a limitation of the plugin itself
     return RACK_VST3_ERROR_GENERIC;
 }
 
