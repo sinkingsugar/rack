@@ -40,6 +40,7 @@ typedef struct {
 #define RACK_VST3_ERROR_INVALID_PARAM -3
 #define RACK_VST3_ERROR_NOT_INITIALIZED -4
 #define RACK_VST3_ERROR_LOAD_FAILED -5
+#define RACK_VST3_ERROR_NOT_SUPPORTED -6  // Feature not supported by this plugin
 
 // ============================================================================
 // Scanner API
@@ -260,6 +261,13 @@ typedef struct {
 // Send MIDI events to plugin
 // events: array of MIDI events
 // event_count: number of events in array
+//
+// NOTE: VST3 has native support for Note On/Off, Polyphonic Aftertouch, and Control Change.
+//       Program Change, Channel Aftertouch, and Pitch Bend use custom encoding via
+//       LegacyMIDICCOutEvent with controlNumber >= 0x80. Not all VST3 plugins support
+//       these non-native event types. If a plugin doesn't respond to Program Change,
+//       Channel Aftertouch, or Pitch Bend, it's a limitation of the plugin itself.
+//
 // Returns 0 on success, negative error code on failure
 // Thread-safety: Should be called from the same thread that owns the plugin instance.
 // Not safe to call concurrently with process() or other plugin operations.

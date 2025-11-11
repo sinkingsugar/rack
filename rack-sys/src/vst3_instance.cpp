@@ -912,8 +912,8 @@ int rack_vst3_plugin_load_preset(RackVST3Plugin* plugin, int32_t preset_number) 
     }
 
     // No fallback succeeded - plugin doesn't support programmatic preset loading
-    // This is not an error - it's a limitation of the plugin itself
-    return RACK_VST3_ERROR_GENERIC;
+    // This is a plugin limitation, not a runtime error
+    return RACK_VST3_ERROR_NOT_SUPPORTED;
 }
 
 int rack_vst3_plugin_get_state_size(RackVST3Plugin* plugin) {
