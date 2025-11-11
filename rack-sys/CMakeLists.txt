@@ -53,8 +53,9 @@ if(HAVE_VST3_SDK)
         external/vst3sdk/pluginterfaces/base/funknown.cpp
         external/vst3sdk/pluginterfaces/base/coreiids.cpp
         # String conversion utilities (UTF-16 <-> UTF-8)
+        external/vst3sdk/public.sdk/source/common/commonstringconvert.cpp
         external/vst3sdk/public.sdk/source/vst/vstinitiids.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/stringconvert.cpp
+        external/vst3sdk/public.sdk/source/vst/utility/stringconvert.cpp
         # Hosting sources
         external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
         external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
