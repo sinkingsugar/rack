@@ -150,6 +150,16 @@ pub trait PluginInstance: Send {
     /// - Timing Clock, Start, Continue, Stop
     /// - Active Sensing, System Reset
     ///
+    /// # Format-Specific Limitations
+    ///
+    /// **VST3:**
+    /// - System real-time messages (Timing Clock, Start, Continue, Stop, etc.) are
+    ///   silently ignored as VST3 does not have a standard way to send them.
+    /// - Only channel messages (Note On/Off, CC, Program Change, etc.) are supported.
+    ///
+    /// **AudioUnit:**
+    /// - Full MIDI 1.0 support including system real-time messages.
+    ///
     /// # Arguments
     ///
     /// * `events` - Slice of MIDI events to send

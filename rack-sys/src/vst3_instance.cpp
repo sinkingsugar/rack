@@ -689,6 +689,12 @@ int rack_vst3_plugin_set_parameter(RackVST3Plugin* plugin, uint32_t index, float
         return RACK_VST3_ERROR_INVALID_PARAM;
     }
 
+    // Clamp normalized value to 0.0-1.0
+    // VST3 uses normalized parameter values (0.0-1.0 range)
+    // This matches AudioUnit behavior for consistency across plugin formats
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+
     ParamID param_id = plugin->parameters[index].id;
 
     // Set parameter value on controller (for UI reflection)
