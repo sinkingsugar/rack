@@ -61,7 +61,7 @@ impl Vst3Plugin {
             }
 
             Ok(Self {
-                inner: NonNull::new_unchecked(ptr),
+                inner: NonNull::new(ptr).expect("pointer is non-null after null check"),
                 info: info.clone(),
                 input_ptrs: Vec::new(),
                 output_ptrs: Vec::new(),
@@ -324,7 +324,9 @@ impl PluginInstance for Vst3Plugin {
             )));
         }
 
-        // Validate inputs (channel counts are now guaranteed to be correct)
+        // Defense-in-depth: Catch initialization bugs where channel counts are zero
+        // This is technically redundant (covered by checks above) but guards against
+        // future bugs in initialize() that could leave channels at zero
         if inputs.is_empty() || outputs.is_empty() {
             return Err(Error::Other("Empty input or output channels".to_string()));
         }

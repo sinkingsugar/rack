@@ -55,7 +55,7 @@ impl Vst3Scanner {
             }
 
             Ok(Self {
-                inner: NonNull::new_unchecked(ptr),
+                inner: NonNull::new(ptr).expect("pointer is non-null after null check"),
                 _not_sync: PhantomData,
             })
         }
@@ -76,7 +76,7 @@ impl Vst3Scanner {
             }
 
             Ok(Self {
-                inner: NonNull::new_unchecked(ptr),
+                inner: NonNull::new(ptr).expect("pointer is non-null after null check"),
                 _not_sync: PhantomData,
             })
         }
