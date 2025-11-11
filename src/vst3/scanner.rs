@@ -46,20 +46,39 @@ impl Vst3Scanner {
                 return Err(Error::Other("Failed to allocate VST3 scanner".to_string()));
             }
 
-            let scanner = Self {
-                inner: NonNull::new_unchecked(ptr),
-                _not_sync: PhantomData,
-            };
-
             // Add default system paths
-            let result = ffi::rack_vst3_scanner_add_default_paths(scanner.inner.as_ptr());
+            let result = ffi::rack_vst3_scanner_add_default_paths(ptr);
             if result != ffi::RACK_VST3_OK {
                 // Clean up scanner before returning error
-                ffi::rack_vst3_scanner_free(scanner.inner.as_ptr());
+                ffi::rack_vst3_scanner_free(ptr);
                 return Err(map_error(result));
             }
 
-            Ok(scanner)
+            Ok(Self {
+                inner: NonNull::new_unchecked(ptr),
+                _not_sync: PhantomData,
+            })
+        }
+    }
+
+    /// Create a new VST3 scanner without adding default paths
+    ///
+    /// This is useful for scanning specific paths without system defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if scanner allocation fails
+    fn new_empty() -> Result<Self> {
+        unsafe {
+            let ptr = ffi::rack_vst3_scanner_new();
+            if ptr.is_null() {
+                return Err(Error::Other("Failed to allocate VST3 scanner".to_string()));
+            }
+
+            Ok(Self {
+                inner: NonNull::new_unchecked(ptr),
+                _not_sync: PhantomData,
+            })
         }
     }
 
@@ -191,18 +210,8 @@ impl PluginScanner for Vst3Scanner {
     }
 
     fn scan_path(&self, path: &Path) -> Result<Vec<PluginInfo>> {
-        // Create a new scanner for path-specific scanning
-        let mut scanner = Self::new()?;
-
-        // Clear default paths by creating a fresh scanner without default paths
-        unsafe {
-            ffi::rack_vst3_scanner_free(scanner.inner.as_ptr());
-            let ptr = ffi::rack_vst3_scanner_new();
-            if ptr.is_null() {
-                return Err(Error::Other("Failed to allocate VST3 scanner".to_string()));
-            }
-            scanner.inner = NonNull::new_unchecked(ptr);
-        }
+        // Create a scanner without default paths for path-specific scanning
+        let mut scanner = Self::new_empty()?;
 
         // Add only the requested path
         scanner.add_path(path)?;
