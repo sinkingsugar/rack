@@ -166,8 +166,10 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
         vst3_sdk_path.clone()
     };
 
-    // Check if already cloned to target location
-    if clone_target.exists() && clone_target.join("CMakeLists.txt").exists() {
+    // Check if already cloned to target location (with content verification)
+    if clone_target.exists()
+        && clone_target.join("CMakeLists.txt").exists()
+        && clone_target.join("pluginterfaces").exists() {
         eprintln!("VST3 SDK already exists at {}", clone_target.display());
         return Some(clone_target);
     }
