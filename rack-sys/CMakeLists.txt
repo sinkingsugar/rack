@@ -53,31 +53,31 @@ if(HAVE_VST3_SDK)
     # VST3 SDK base sources (required for FUID, FUnknown, etc.)
     set(VST3_SDK_SOURCES
         # Base library - provides FUID, FUnknown, interface IIDs
-        external/vst3sdk/public.sdk/source/common/commoniids.cpp
-        external/vst3sdk/pluginterfaces/base/funknown.cpp
-        external/vst3sdk/pluginterfaces/base/coreiids.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/common/commoniids.cpp
+        ${VST3_SDK_PATH}/pluginterfaces/base/funknown.cpp
+        ${VST3_SDK_PATH}/pluginterfaces/base/coreiids.cpp
         # String conversion utilities (UTF-16 <-> UTF-8)
-        external/vst3sdk/public.sdk/source/common/commonstringconvert.cpp
-        external/vst3sdk/public.sdk/source/vst/vstinitiids.cpp
-        external/vst3sdk/public.sdk/source/vst/utility/stringconvert.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/common/commonstringconvert.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/vstinitiids.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/utility/stringconvert.cpp
         # Hosting sources
-        external/vst3sdk/public.sdk/source/vst/hosting/module.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/hostclasses.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/processdata.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/parameterchanges.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/eventlist.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/connectionproxy.cpp
-        external/vst3sdk/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/plugprovider.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/hostclasses.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/processdata.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/parameterchanges.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/eventlist.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/connectionproxy.cpp
+        ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
     )
 
     # Platform-specific VST3 module loading
     if(APPLE)
-        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_mac.mm)
+        list(APPEND VST3_SDK_SOURCES ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module_mac.mm)
     elseif(WIN32)
-        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_win32.cpp)
+        list(APPEND VST3_SDK_SOURCES ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module_win32.cpp)
     else()
-        list(APPEND VST3_SDK_SOURCES external/vst3sdk/public.sdk/source/vst/hosting/module_linux.cpp)
+        list(APPEND VST3_SDK_SOURCES ${VST3_SDK_PATH}/public.sdk/source/vst/hosting/module_linux.cpp)
     endif()
 endif()
 
@@ -102,7 +102,7 @@ target_include_directories(rack_sys PUBLIC
 # Add VST3 SDK include directory if available
 if(HAVE_VST3_SDK)
     target_include_directories(rack_sys PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk
+        ${VST3_SDK_PATH}
     )
 endif()
 
