@@ -7,11 +7,24 @@ fn main() {
 
     // VST3 is only supported on desktop platforms (macOS, Linux, Windows)
     // Skip VST3 SDK setup on iOS/tvOS/watchOS/visionOS
+    // Also skip during cargo publish to avoid modifying source directory
     let is_desktop = matches!(target_os.as_str(), "macos" | "linux" | "windows");
-    if is_desktop {
+
+    // Detect if we're in a cargo publish verification build
+    let current_dir = env::current_dir().unwrap();
+    let in_publish_verify = current_dir
+        .to_str()
+        .map(|s| s.contains("/target/package/"))
+        .unwrap_or(false);
+
+    if is_desktop && !in_publish_verify {
         ensure_vst3_sdk();
     } else {
-        eprintln!("Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)", target_os);
+        if in_publish_verify {
+            eprintln!("Skipping VST3 SDK auto-clone for cargo publish (VST3 support disabled)");
+        } else {
+            eprintln!("Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)", target_os);
+        }
     }
 
     // Check if ASAN should be enabled
