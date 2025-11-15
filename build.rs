@@ -42,8 +42,14 @@ fn main() {
 
     // Pass VST3 SDK path to CMake if available
     let have_vst3 = if let Some(sdk_path) = vst3_sdk_path {
-        config.define("VST3_SDK_PATH", sdk_path.to_str().unwrap());
-        eprintln!("Configuring CMake with VST3 SDK at: {}", sdk_path.display());
+        // Convert to absolute path - CMake runs in build dir, needs absolute path
+        let sdk_path_abs = if sdk_path.is_absolute() {
+            sdk_path
+        } else {
+            env::current_dir().unwrap().join(&sdk_path)
+        };
+        config.define("VST3_SDK_PATH", sdk_path_abs.to_str().unwrap());
+        eprintln!("Configuring CMake with VST3 SDK at: {}", sdk_path_abs.display());
         true
     } else {
         eprintln!("VST3 SDK not available - VST3 support will be disabled");
