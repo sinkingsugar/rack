@@ -9,6 +9,14 @@ repository = "https://github.com/sinkingsugar/rack"
 readme = "README.md"
 keywords = ["audio", "plugin", "vst", "audiounit", "host"]
 categories = ["multimedia::audio"]
+exclude = [
+    "rack-sys/external/vst3sdk/",
+    ".github/",
+    "TODO.md",
+    "CLAUDE.md",
+    "rack/CLAUDE.md",
+    "rack-sys/CLAUDE.md",
+]
 
 [dependencies]
 smallvec = "1.13"
