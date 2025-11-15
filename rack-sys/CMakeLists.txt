@@ -22,7 +22,11 @@ endif()
 
 # Check if VST3 SDK is available
 # VST3 is only supported on desktop platforms (macOS, Linux, Windows)
-set(VST3_SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+# VST3_SDK_PATH can be overridden by build.rs (e.g., when building from crates.io)
+if(NOT DEFINED VST3_SDK_PATH)
+    set(VST3_SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+endif()
+message(STATUS "VST3 SDK path: ${VST3_SDK_PATH}")
 set(HAVE_VST3_SDK FALSE)
 
 # VST3 is not supported on mobile platforms

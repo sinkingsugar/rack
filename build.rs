@@ -17,15 +17,17 @@ fn main() {
         .map(|s| s.contains("/target/package/"))
         .unwrap_or(false);
 
-    if is_desktop && !in_publish_verify {
-        ensure_vst3_sdk();
+    // Determine VST3 SDK path and ensure it's available
+    let vst3_sdk_path = if is_desktop && !in_publish_verify {
+        ensure_vst3_sdk()
     } else {
         if in_publish_verify {
             eprintln!("Skipping VST3 SDK auto-clone for cargo publish (VST3 support disabled)");
         } else {
             eprintln!("Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)", target_os);
         }
-    }
+        None
+    };
 
     // Check if ASAN should be enabled
     let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
@@ -35,6 +37,12 @@ fn main() {
     config
         .define("CMAKE_BUILD_TYPE", "Release")
         .define("BUILD_TESTS", "OFF"); // Don't build C++ tests in Rust build
+
+    // Pass VST3 SDK path to CMake if available
+    if let Some(sdk_path) = vst3_sdk_path {
+        config.define("VST3_SDK_PATH", sdk_path.to_str().unwrap());
+        eprintln!("Configuring CMake with VST3 SDK at: {}", sdk_path.display());
+    }
 
     if enable_asan {
         config.define("ENABLE_ASAN", "ON");
@@ -112,40 +120,69 @@ fn link_apple_frameworks(target_os: &str) {
 }
 
 /// Ensure VST3 SDK is available, cloning it if necessary
-fn ensure_vst3_sdk() {
+/// Returns the path to the VST3 SDK, or None if unavailable
+fn ensure_vst3_sdk() -> Option<PathBuf> {
     let vst3_sdk_path = PathBuf::from("rack-sys/external/vst3sdk");
 
-    // Check if SDK exists and has content
+    // Check if SDK exists and has content (in source tree)
     let sdk_exists = vst3_sdk_path.exists()
         && vst3_sdk_path.join("CMakeLists.txt").exists()
         && vst3_sdk_path.join("pluginterfaces").exists();
 
     if sdk_exists {
         eprintln!("VST3 SDK found at {}", vst3_sdk_path.display());
-        return;
+        return Some(vst3_sdk_path);
     }
 
-    eprintln!("VST3 SDK not found, attempting to clone...");
+    eprintln!("VST3 SDK not found in source tree, attempting to clone...");
+
+    // Determine where to clone the SDK
+    // When building from crates.io, the source dir is read-only, so clone to OUT_DIR
+    let current_dir = env::current_dir().unwrap();
+    let in_cargo_registry = current_dir
+        .to_str()
+        .map(|s| s.contains("/.cargo/registry/"))
+        .unwrap_or(false);
+
+    let clone_target = if in_cargo_registry {
+        // Building from crates.io - clone to OUT_DIR (writable)
+        let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+        let sdk_path = out_dir.join("vst3sdk");
+        eprintln!("Building from crates.io - will clone VST3 SDK to OUT_DIR: {}", sdk_path.display());
+        sdk_path
+    } else {
+        // Building from git checkout - clone to source tree
+        vst3_sdk_path.clone()
+    };
+
+    // Check if already cloned to target location
+    if clone_target.exists() && clone_target.join("CMakeLists.txt").exists() {
+        eprintln!("VST3 SDK already exists at {}", clone_target.display());
+        return Some(clone_target);
+    }
 
     // Try to initialize git submodule first (for developers who cloned with submodules)
-    let submodule_init = Command::new("git")
-        .args(&["submodule", "update", "--init", "--recursive", "rack-sys/external/vst3sdk"])
-        .current_dir(env::current_dir().unwrap())
-        .output();
+    if !in_cargo_registry {
+        let submodule_init = Command::new("git")
+            .args(&["submodule", "update", "--init", "--recursive", "rack-sys/external/vst3sdk"])
+            .current_dir(&current_dir)
+            .output();
 
-    if let Ok(output) = submodule_init {
-        if output.status.success() {
-            eprintln!("VST3 SDK initialized via git submodule");
-            return;
+        if let Ok(output) = submodule_init {
+            if output.status.success() && vst3_sdk_path.join("CMakeLists.txt").exists() {
+                eprintln!("VST3 SDK initialized via git submodule");
+                return Some(vst3_sdk_path);
+            }
         }
     }
 
-    // Fallback: Clone directly (for cargo users who don't have git submodule setup)
-    eprintln!("Cloning VST3 SDK directly...");
+    // Fallback: Clone directly
+    eprintln!("Cloning VST3 SDK to {}...", clone_target.display());
 
-    // Create external directory if it doesn't exist
-    let external_dir = vst3_sdk_path.parent().unwrap();
-    std::fs::create_dir_all(external_dir).expect("Failed to create external directory");
+    // Create parent directory if it doesn't exist
+    if let Some(parent) = clone_target.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
 
     let clone_result = Command::new("git")
         .args(&[
@@ -153,14 +190,14 @@ fn ensure_vst3_sdk() {
             "--recursive",
             "--depth=1", // Shallow clone to save time
             "https://github.com/steinbergmedia/vst3sdk.git",
-            vst3_sdk_path.to_str().unwrap(),
+            clone_target.to_str().unwrap(),
         ])
-        .current_dir(env::current_dir().unwrap())
         .status();
 
     match clone_result {
         Ok(status) if status.success() => {
-            eprintln!("VST3 SDK cloned successfully");
+            eprintln!("VST3 SDK cloned successfully to {}", clone_target.display());
+            Some(clone_target)
         }
         Ok(status) => {
             eprintln!(
@@ -168,14 +205,13 @@ fn ensure_vst3_sdk() {
                 status.code()
             );
             eprintln!("VST3 support will be disabled.");
-            eprintln!("To enable VST3, clone the SDK manually:");
-            eprintln!("  cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk");
+            None
         }
         Err(e) => {
             eprintln!("Warning: Failed to execute git clone: {}", e);
             eprintln!("VST3 support will be disabled.");
-            eprintln!("To enable VST3, ensure git is installed and clone the SDK manually:");
-            eprintln!("  cd rack-sys && git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk");
+            eprintln!("Ensure git is installed to enable VST3 support.");
+            None
         }
     }
 }
