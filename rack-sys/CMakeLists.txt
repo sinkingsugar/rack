@@ -85,10 +85,17 @@ endif()
 set(RACK_SYS_SOURCES ${RACK_AU_SOURCES} ${RACK_VST3_SOURCES} ${VST3_SDK_SOURCES})
 
 # Validate that we have at least one plugin format
+# On docs.rs, allow build to succeed with stub library for documentation
 if(NOT RACK_AU_SOURCES AND NOT RACK_VST3_SOURCES)
-    message(FATAL_ERROR "No plugin formats available! "
-        "On macOS/iOS, AudioUnit support should be automatic. "
-        "For VST3, clone the SDK: git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
+    if(DOCS_RS_BUILD)
+        message(WARNING "No plugin formats available - building stub library for docs.rs")
+        # Create a minimal stub source file for docs.rs
+        set(RACK_SYS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/stub.cpp")
+    else()
+        message(FATAL_ERROR "No plugin formats available! "
+            "On macOS/iOS, AudioUnit support should be automatic. "
+            "For VST3, clone the SDK: git clone --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk")
+    endif()
 endif()
 
 # Build as static library for easy linking with Rust

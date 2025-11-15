@@ -34,11 +34,19 @@ fn main() {
     // Check if ASAN should be enabled
     let enable_asan = env::var("CARGO_FEATURE_ASAN").is_ok() || env::var("ENABLE_ASAN").is_ok();
 
+    // Detect docs.rs environment
+    let is_docs_rs = env::var("DOCS_RS").is_ok();
+
     // Configure CMake build
     let mut config = cmake::Config::new("rack-sys");
     config
         .define("CMAKE_BUILD_TYPE", "Release")
         .define("BUILD_TESTS", "OFF"); // Don't build C++ tests in Rust build
+
+    // On docs.rs, allow build to succeed even without plugin formats
+    if is_docs_rs {
+        config.define("DOCS_RS_BUILD", "ON");
+    }
 
     // Pass VST3 SDK path to CMake if available
     let have_vst3 = if let Some(sdk_path) = vst3_sdk_path {
