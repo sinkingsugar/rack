@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     - name: Set up Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -133,6 +135,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     - name: Set up Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -153,6 +157,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     - name: Set up Rust nightly
       uses: actions-rust-lang/setup-rust-toolchain@v1
