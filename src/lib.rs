@@ -106,7 +106,9 @@ pub mod prelude {
     #[cfg(target_vendor = "apple")]
     pub use crate::{AudioUnitGui, Plugin, Scanner};
 
+    // VST3 exports (only when SDK is available)
     #[cfg(all(
+        vst3_sdk,
         not(target_vendor = "apple"),
         not(target_os = "ios"),
         not(target_os = "tvos"),
