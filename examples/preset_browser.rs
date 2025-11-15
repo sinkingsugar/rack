@@ -35,7 +35,7 @@ fn main() -> Result<()> {
         // Try to check if plugin has presets by creating a temporary instance
         if let Ok(mut plugin) = scanner.load(info) {
             if plugin.initialize(48000.0, 512).is_ok() {
-                return plugin.preset_count() > 0;
+                return plugin.preset_count().map_or(false, |count| count > 0);
             }
         }
         false
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
     println!("✓ Plugin initialized successfully!\n");
 
     // Get preset count
-    let preset_count = plugin.preset_count();
+    let preset_count = plugin.preset_count()?;
     println!("Factory Presets: {}", preset_count);
     println!();
 

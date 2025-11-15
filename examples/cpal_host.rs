@@ -269,12 +269,14 @@ fn main() -> Result<()> {
         } else if input == "l" {
             // List presets
             let plugin = plugin.lock().unwrap();
-            let preset_count = plugin.preset_count();
-            if preset_count > 0 {
-                println!("\nPlugin has {} presets", preset_count);
-                println!("Use 1-9 to select presets\n");
-            } else {
-                println!("\nNo presets available for this plugin\n");
+            match plugin.preset_count() {
+                Ok(preset_count) if preset_count > 0 => {
+                    println!("\nPlugin has {} presets", preset_count);
+                    println!("Use 1-9 to select presets\n");
+                }
+                _ => {
+                    println!("\nNo presets available for this plugin\n");
+                }
             }
         } else if let Some(ch) = input.chars().next() {
             // Handle keyboard input

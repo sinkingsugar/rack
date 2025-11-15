@@ -1,4 +1,4 @@
-use crate::{MidiEvent, ParameterInfo, PluginInfo, Result};
+use crate::{MidiEvent, ParameterInfo, PluginInfo, PresetInfo, Result};
 
 /// Trait for scanning and discovering audio plugins
 pub trait PluginScanner {
@@ -171,6 +171,65 @@ pub trait PluginInstance: Send {
     /// - Any event has invalid data (channel > 15, etc.)
     /// - The plugin is not initialized
     fn send_midi(&mut self, events: &[MidiEvent]) -> Result<()>;
+
+    /// Get the number of factory presets
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin is not initialized
+    fn preset_count(&self) -> Result<usize>;
+
+    /// Get information about a factory preset
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Preset index (0 to preset_count() - 1)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The index is out of range
+    fn preset_info(&self, index: usize) -> Result<PresetInfo>;
+
+    /// Load a factory preset by preset number
+    ///
+    /// # Arguments
+    ///
+    /// * `preset_number` - The preset number (from PresetInfo::preset_number)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The preset number is invalid
+    fn load_preset(&mut self, preset_number: i32) -> Result<()>;
+
+    /// Get the plugin's current state as a byte array
+    ///
+    /// This can be saved and restored later with `set_state()`.
+    /// The state includes all parameter values and plugin-specific state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The plugin doesn't support state serialization
+    fn get_state(&self) -> Result<Vec<u8>>;
+
+    /// Restore the plugin's state from a byte array
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - State data previously obtained from `get_state()`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The state data is invalid or corrupted
+    /// - The plugin doesn't support state serialization
+    fn set_state(&mut self, data: &[u8]) -> Result<()>;
 
     /// Get plugin info
     fn info(&self) -> &PluginInfo;

@@ -72,6 +72,175 @@ impl Vst3Plugin {
         }
     }
 
+    /// Get the number of factory presets
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin is not initialized
+    pub fn preset_count(&self) -> Result<usize> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            let count = ffi::rack_vst3_plugin_get_preset_count(self.inner.as_ptr());
+            if count < 0 {
+                Ok(0) // Plugin has no presets
+            } else {
+                Ok(count as usize)
+            }
+        }
+    }
+
+    /// Get information about a factory preset
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The index is out of range
+    /// - The preset info cannot be retrieved
+    pub fn preset_info(&self, index: usize) -> Result<PresetInfo> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            let mut name = vec![0i8; 256];
+            let mut preset_number = 0i32;
+
+            let result = ffi::rack_vst3_plugin_get_preset_info(
+                self.inner.as_ptr(),
+                index as u32,
+                name.as_mut_ptr(),
+                name.len(),
+                &mut preset_number,
+            );
+
+            if result != ffi::RACK_VST3_OK {
+                return Err(map_error(result));
+            }
+
+            // Convert name to String
+            let name_cstr = std::ffi::CStr::from_ptr(name.as_ptr());
+            let name_str = name_cstr
+                .to_str()
+                .map_err(|e| Error::Other(format!("Invalid UTF-8 in preset name: {}", e)))?
+                .to_string();
+
+            Ok(PresetInfo {
+                index,
+                name: name_str,
+                preset_number,
+            })
+        }
+    }
+
+    /// Load a factory preset
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The preset number is invalid
+    /// - The preset cannot be loaded
+    pub fn load_preset(&mut self, preset_number: i32) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            let result = ffi::rack_vst3_plugin_load_preset(self.inner.as_ptr(), preset_number);
+
+            if result != ffi::RACK_VST3_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
+        }
+    }
+
+    /// Get plugin state as a byte vector
+    ///
+    /// This serializes the complete plugin state including parameters, presets,
+    /// and any internal state. The state can be saved to disk and restored later
+    /// using `set_state()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the plugin is not initialized or state cannot be retrieved
+    pub fn get_state(&self) -> Result<Vec<u8>> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        unsafe {
+            // Get required state size
+            let size = ffi::rack_vst3_plugin_get_state_size(self.inner.as_ptr());
+
+            if size <= 0 {
+                return Err(Error::Other("Cannot retrieve plugin state".to_string()));
+            }
+
+            let size_usize = size as usize;
+
+            // Allocate buffer
+            let mut data = vec![0u8; size_usize];
+            let mut actual_size = size_usize;
+
+            // Get state
+            let result = ffi::rack_vst3_plugin_get_state(
+                self.inner.as_ptr(),
+                data.as_mut_ptr(),
+                &mut actual_size,
+            );
+
+            if result != ffi::RACK_VST3_OK {
+                return Err(map_error(result));
+            }
+
+            // Truncate to actual size (may be smaller than allocated)
+            data.truncate(actual_size);
+
+            Ok(data)
+        }
+    }
+
+    /// Restore plugin state from a byte slice
+    ///
+    /// This deserializes the complete plugin state including parameters, presets,
+    /// and any internal state. The data should be obtained from a previous
+    /// `get_state()` call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The plugin is not initialized
+    /// - The state data is invalid or corrupted
+    /// - The state cannot be restored
+    pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
+        if !self.is_initialized() {
+            return Err(Error::NotInitialized);
+        }
+
+        if data.is_empty() {
+            return Err(Error::Other("State data is empty".to_string()));
+        }
+
+        unsafe {
+            let result = ffi::rack_vst3_plugin_set_state(
+                self.inner.as_ptr(),
+                data.as_ptr(),
+                data.len(),
+            );
+
+            if result != ffi::RACK_VST3_OK {
+                return Err(map_error(result));
+            }
+
+            Ok(())
+        }
+    }
 }
 
 impl Drop for Vst3Plugin {
