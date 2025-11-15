@@ -136,9 +136,11 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
     let vst3_sdk_path = PathBuf::from("rack-sys/external/vst3sdk");
 
     // Check if SDK exists and has content (in source tree)
+    // Verify actual source files exist, not just empty directories
     let sdk_exists = vst3_sdk_path.exists()
         && vst3_sdk_path.join("CMakeLists.txt").exists()
-        && vst3_sdk_path.join("pluginterfaces").exists();
+        && vst3_sdk_path.join("pluginterfaces/base/funknown.cpp").exists()
+        && vst3_sdk_path.join("public.sdk/source/common/commoniids.cpp").exists();
 
     if sdk_exists {
         eprintln!("VST3 SDK found at {}", vst3_sdk_path.display());
@@ -167,9 +169,11 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
     };
 
     // Check if already cloned to target location (with content verification)
+    // Verify actual source files exist, not just empty directories
     if clone_target.exists()
         && clone_target.join("CMakeLists.txt").exists()
-        && clone_target.join("pluginterfaces").exists() {
+        && clone_target.join("pluginterfaces/base/funknown.cpp").exists()
+        && clone_target.join("public.sdk/source/common/commoniids.cpp").exists() {
         eprintln!("VST3 SDK already exists at {}", clone_target.display());
         return Some(clone_target);
     }
@@ -182,7 +186,11 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
             .output();
 
         if let Ok(output) = submodule_init {
-            if output.status.success() && vst3_sdk_path.join("CMakeLists.txt").exists() {
+            // Verify sub-submodules were also initialized (not just empty directories)
+            if output.status.success()
+                && vst3_sdk_path.join("CMakeLists.txt").exists()
+                && vst3_sdk_path.join("pluginterfaces/base/funknown.cpp").exists()
+                && vst3_sdk_path.join("public.sdk/source/common/commoniids.cpp").exists() {
                 eprintln!("VST3 SDK initialized via git submodule");
                 return Some(vst3_sdk_path);
             }
