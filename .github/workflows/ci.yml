@@ -17,6 +17,13 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Initialize VST3 SDK submodules
+      run: |
+        git submodule update --init --recursive
+        echo "Verifying VST3 SDK content..."
+        ls -la rack-sys/external/vst3sdk/
+        ls -la rack-sys/external/vst3sdk/pluginterfaces/ || echo "WARNING: pluginterfaces not found"
+
     - name: Set up Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
