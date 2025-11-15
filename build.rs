@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // Declare custom cfg for VST3 SDK availability
+    println!("cargo::rustc-check-cfg=cfg(vst3_sdk)");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
 
     // VST3 is only supported on desktop platforms (macOS, Linux, Windows)
@@ -39,9 +41,18 @@ fn main() {
         .define("BUILD_TESTS", "OFF"); // Don't build C++ tests in Rust build
 
     // Pass VST3 SDK path to CMake if available
-    if let Some(sdk_path) = vst3_sdk_path {
+    let have_vst3 = if let Some(sdk_path) = vst3_sdk_path {
         config.define("VST3_SDK_PATH", sdk_path.to_str().unwrap());
         eprintln!("Configuring CMake with VST3 SDK at: {}", sdk_path.display());
+        true
+    } else {
+        eprintln!("VST3 SDK not available - VST3 support will be disabled");
+        false
+    };
+
+    // Tell Cargo about VST3 availability for conditional compilation
+    if have_vst3 {
+        println!("cargo:rustc-cfg=vst3_sdk");
     }
 
     if enable_asan {

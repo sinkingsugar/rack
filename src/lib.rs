@@ -67,9 +67,11 @@ pub use traits::{PluginInstance, PluginScanner};
 #[cfg(target_vendor = "apple")]
 pub mod au;
 
-// VST3 is available on desktop platforms (Windows, macOS, Linux)
+// VST3 is available on desktop platforms (Windows, macOS, Linux) when the SDK is present
 // Explicitly disabled on mobile platforms (iOS, tvOS, watchOS, visionOS)
+// The "vst3_sdk" cfg is set by build.rs when the VST3 SDK is found
 #[cfg(all(
+    vst3_sdk,
     not(target_os = "ios"),
     not(target_os = "tvos"),
     not(target_os = "watchos"),
@@ -82,8 +84,9 @@ pub mod vst3;
 #[cfg(target_vendor = "apple")]
 pub use au::{AudioUnitGui, AudioUnitPlugin as Plugin, AudioUnitScanner as Scanner};
 
-// On non-Apple desktop platforms, default to VST3
+// On non-Apple desktop platforms, default to VST3 (if available)
 #[cfg(all(
+    vst3_sdk,
     not(target_vendor = "apple"),
     not(target_os = "ios"),
     not(target_os = "tvos"),

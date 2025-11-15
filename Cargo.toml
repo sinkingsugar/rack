@@ -1,6 +1,6 @@
 [package]
 name = "rack"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 authors = ["Giovanni <giovanni@fragcolor.com>"]
 license = "MIT OR Apache-2.0"
@@ -31,6 +31,8 @@ cmake = "0.1"
 [features]
 default = []
 cpal = ["dep:cpal"]
+# VST3 feature for examples - actual VST3 support depends on SDK availability at build time
+vst3 = []
 
 [[example]]
 name = "list_plugins"
@@ -48,6 +50,16 @@ path = "examples/process_audio.rs"
 name = "cpal_host"
 path = "examples/cpal_host.rs"
 required-features = ["cpal"]
+
+[[example]]
+name = "list_vst3_plugins"
+path = "examples/list_vst3_plugins.rs"
+required-features = ["vst3"]
+
+[[example]]
+name = "vst3_processor"
+path = "examples/vst3_processor.rs"
+required-features = ["vst3"]
 
 [profile.dev]
 opt-level = 2  # Audio needs some optimization even in debug
