@@ -283,6 +283,19 @@ int rack_vst3_plugin_send_midi(
     uint32_t event_count
 );
 
+// ============================================================================
+// GUI API (Windows only)
+// ============================================================================
+typedef void (*RackVST3GuiCloseCallback)(void* user_data);
+
+int rack_vst3_gui_has_editor(RackVST3Plugin* plugin);
+RackVST3Gui* rack_vst3_gui_create(RackVST3Plugin* plugin);
+void rack_vst3_gui_destroy(RackVST3Gui* gui);
+int rack_vst3_gui_get_size(RackVST3Gui* gui, int32_t* width, int32_t* height);
+int rack_vst3_gui_show_window(RackVST3Gui* gui, const char* title);
+int rack_vst3_gui_hide_window(RackVST3Gui* gui);
+void rack_vst3_gui_set_close_callback(RackVST3Gui* gui, RackVST3GuiCloseCallback callback, void* user_data);
+
 #ifdef __cplusplus
 }
 #endif

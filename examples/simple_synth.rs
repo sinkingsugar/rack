@@ -24,13 +24,15 @@ fn main() -> Result<()> {
     let synth_info = plugins
         .iter()
         .find(|p| p.plugin_type == PluginType::Instrument)
-        .ok_or_else(|| Error::Other(
+        .ok_or_else(|| {
+            Error::Other(
             "No instrument plugins found. Install a synthesizer AudioUnit to run this example.\n\
              macOS includes DLSMusicDevice by default. You can also install free synths like:\n\
              - Dexed (DX7 emulator)\n\
              - Surge XT\n\
              - Vital".to_string()
-        ))?;
+        )
+        })?;
 
     println!("Using instrument: {}", synth_info.name);
     println!("Manufacturer: {}", synth_info.manufacturer);
@@ -75,7 +77,7 @@ fn main() -> Result<()> {
         plugin.process(
             &[&left_in, &right_in],
             &mut [&mut left_out, &mut right_out],
-            buffer_frames
+            buffer_frames,
         )?;
 
         // Calculate RMS and peak levels for this buffer
@@ -110,7 +112,7 @@ fn main() -> Result<()> {
         plugin.process(
             &[&left_in, &right_in],
             &mut [&mut left_out, &mut right_out],
-            buffer_frames
+            buffer_frames,
         )?;
 
         let (rms_left, rms_right, peak_left, peak_right) = analyze_buffer(&left_out, &right_out);
@@ -133,10 +135,7 @@ fn main() -> Result<()> {
 }
 
 /// Calculate RMS and peak levels for left and right channels (planar format)
-fn analyze_buffer(
-    left: &[f32],
-    right: &[f32],
-) -> (f32, f32, f32, f32) {
+fn analyze_buffer(left: &[f32], right: &[f32]) -> (f32, f32, f32, f32) {
     let frames = left.len();
 
     let mut sum_left = 0.0f32;

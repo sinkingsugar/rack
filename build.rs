@@ -26,7 +26,10 @@ fn main() {
         if in_publish_verify {
             eprintln!("Skipping VST3 SDK auto-clone for cargo publish (VST3 support disabled)");
         } else {
-            eprintln!("Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)", target_os);
+            eprintln!(
+                "Skipping VST3 SDK setup for {} (VST3 only supported on desktop platforms)",
+                target_os
+            );
         }
         None
     };
@@ -57,7 +60,10 @@ fn main() {
             env::current_dir().unwrap().join(&sdk_path)
         };
         config.define("VST3_SDK_PATH", sdk_path_abs.to_str().unwrap());
-        eprintln!("Configuring CMake with VST3 SDK at: {}", sdk_path_abs.display());
+        eprintln!(
+            "Configuring CMake with VST3 SDK at: {}",
+            sdk_path_abs.display()
+        );
         true
     } else {
         eprintln!("VST3 SDK not available - VST3 support will be disabled");
@@ -97,7 +103,10 @@ fn main() {
             println!("cargo:rustc-link-lib=dl");
         }
         "windows" => {
-            // Windows uses static linking by default, no extra libs needed for C++
+            // ole32 provides CoCreateGuid, required by VST3 SDK's FUID::generate()
+            println!("cargo:rustc-link-lib=ole32");
+            // user32 provides CreateWindowEx, etc., required for VST3 GUI hosting
+            println!("cargo:rustc-link-lib=user32");
         }
         _ => {
             eprintln!("Warning: Unsupported target OS: {}", target_os);
@@ -153,8 +162,12 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
     // Verify actual source files exist, not just empty directories
     let sdk_exists = vst3_sdk_path.exists()
         && vst3_sdk_path.join("CMakeLists.txt").exists()
-        && vst3_sdk_path.join("pluginterfaces/base/funknown.cpp").exists()
-        && vst3_sdk_path.join("public.sdk/source/common/commoniids.cpp").exists();
+        && vst3_sdk_path
+            .join("pluginterfaces/base/funknown.cpp")
+            .exists()
+        && vst3_sdk_path
+            .join("public.sdk/source/common/commoniids.cpp")
+            .exists();
 
     if sdk_exists {
         eprintln!("VST3 SDK found at {}", vst3_sdk_path.display());
@@ -175,7 +188,10 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
         // Building from crates.io - clone to OUT_DIR (writable)
         let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
         let sdk_path = out_dir.join("vst3sdk");
-        eprintln!("Building from crates.io - will clone VST3 SDK to OUT_DIR: {}", sdk_path.display());
+        eprintln!(
+            "Building from crates.io - will clone VST3 SDK to OUT_DIR: {}",
+            sdk_path.display()
+        );
         sdk_path
     } else {
         // Building from git checkout - clone to source tree
@@ -186,8 +202,13 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
     // Verify actual source files exist, not just empty directories
     if clone_target.exists()
         && clone_target.join("CMakeLists.txt").exists()
-        && clone_target.join("pluginterfaces/base/funknown.cpp").exists()
-        && clone_target.join("public.sdk/source/common/commoniids.cpp").exists() {
+        && clone_target
+            .join("pluginterfaces/base/funknown.cpp")
+            .exists()
+        && clone_target
+            .join("public.sdk/source/common/commoniids.cpp")
+            .exists()
+    {
         eprintln!("VST3 SDK already exists at {}", clone_target.display());
         return Some(clone_target);
     }
@@ -195,7 +216,13 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
     // Try to initialize git submodule first (for developers who cloned with submodules)
     if !in_cargo_registry {
         let submodule_init = Command::new("git")
-            .args(&["submodule", "update", "--init", "--recursive", "rack-sys/external/vst3sdk"])
+            .args(&[
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "rack-sys/external/vst3sdk",
+            ])
             .current_dir(&current_dir)
             .output();
 
@@ -203,8 +230,13 @@ fn ensure_vst3_sdk() -> Option<PathBuf> {
             // Verify sub-submodules were also initialized (not just empty directories)
             if output.status.success()
                 && vst3_sdk_path.join("CMakeLists.txt").exists()
-                && vst3_sdk_path.join("pluginterfaces/base/funknown.cpp").exists()
-                && vst3_sdk_path.join("public.sdk/source/common/commoniids.cpp").exists() {
+                && vst3_sdk_path
+                    .join("pluginterfaces/base/funknown.cpp")
+                    .exists()
+                && vst3_sdk_path
+                    .join("public.sdk/source/common/commoniids.cpp")
+                    .exists()
+            {
                 eprintln!("VST3 SDK initialized via git submodule");
                 return Some(vst3_sdk_path);
             }

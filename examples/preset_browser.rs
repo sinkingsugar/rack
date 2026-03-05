@@ -74,7 +74,10 @@ fn main() -> Result<()> {
         println!("{:-<60}", "");
         for i in 0..preset_count {
             let preset = plugin.preset_info(i)?;
-            println!("[{}] {} (preset #{:3})", i, preset.name, preset.preset_number);
+            println!(
+                "[{}] {} (preset #{:3})",
+                i, preset.name, preset.preset_number
+            );
         }
         println!("{:-<60}", "");
         println!();
@@ -102,8 +105,10 @@ fn main() -> Result<()> {
                 let value = plugin.get_parameter(0)?;
                 let actual = param_info.min + (value * (param_info.max - param_info.min));
 
-                println!("Preset '{}': parameter = {:.4} (actual: {:.2})",
-                         preset.name, value, actual);
+                println!(
+                    "Preset '{}': parameter = {:.4} (actual: {:.2})",
+                    preset.name, value, actual
+                );
             }
             println!();
         }

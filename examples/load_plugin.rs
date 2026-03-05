@@ -54,9 +54,7 @@ fn main() -> Result<()> {
     }
 
     // Fall back to first effect plugin
-    let effect = plugins
-        .iter()
-        .find(|p| p.plugin_type == PluginType::Effect);
+    let effect = plugins.iter().find(|p| p.plugin_type == PluginType::Effect);
 
     if let Some(info) = effect {
         println!("No instrument found, loading effect plugin:");

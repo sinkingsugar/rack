@@ -50,6 +50,10 @@ if(HAVE_VST3_SDK)
         src/vst3_instance.cpp
     )
 
+    if(WIN32)
+        list(APPEND RACK_VST3_SOURCES src/vst3_gui_win32.cpp)
+    endif()
+
     # VST3 SDK base sources (required for FUID, FUnknown, etc.)
     set(VST3_SDK_SOURCES
         # Base library - provides FUID, FUnknown, interface IIDs
@@ -142,6 +146,19 @@ endif()
 # Linux platform-specific settings (for VST3)
 if(UNIX AND NOT APPLE)
     target_link_libraries(rack_sys PUBLIC ${CMAKE_DL_LIBS})
+endif()
+
+# MSVC-specific settings
+if(MSVC)
+    target_compile_options(rack_sys PRIVATE
+        # Make __cplusplus report the correct value (MSVC defaults to 199711L).
+        # Without this, the VST3 SDK's SMTG_CPP20 macro evaluates to false even
+        # in C++20 mode, causing char8_t/u8string compilation errors.
+        /Zc:__cplusplus
+        # Prevent windows.h from defining min/max macros that conflict with
+        # std::min/std::max used in vst3_scanner.cpp and other sources.
+        /DNOMINMAX
+    )
 endif()
 
 # Compiler warnings

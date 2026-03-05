@@ -102,14 +102,7 @@ pub struct ParameterInfo {
 
 impl ParameterInfo {
     /// Create a new ParameterInfo
-    pub fn new(
-        index: usize,
-        name: String,
-        min: f32,
-        max: f32,
-        default: f32,
-        unit: String,
-    ) -> Self {
+    pub fn new(index: usize, name: String, min: f32, max: f32, default: f32, unit: String) -> Self {
         Self {
             index,
             name,

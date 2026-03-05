@@ -122,7 +122,10 @@ fn main() -> Result<()> {
             let original_value = plugin.get_parameter(0)?;
             let new_value = (info.min + info.max) / 2.0; // Set to middle
 
-            println!("Parameter '{}': {:.2} -> {:.2}", info.name, original_value, new_value);
+            println!(
+                "Parameter '{}': {:.2} -> {:.2}",
+                info.name, original_value, new_value
+            );
             plugin.set_parameter(0, new_value)?;
 
             let read_back = plugin.get_parameter(0)?;

@@ -26,8 +26,8 @@
 //! - L: List available presets count
 //! - Q: Quit and cleanup
 
-use rack::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use rack::prelude::*;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -53,11 +53,7 @@ type CFRunLoopMode = *const std::ffi::c_void;
 /// This allows dispatch_async callbacks to execute
 fn process_main_event_loop(duration_ms: u64) {
     unsafe {
-        CFRunLoopRunInMode(
-            kCFRunLoopDefaultMode,
-            duration_ms as f64 / 1000.0,
-            false,
-        );
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, duration_ms as f64 / 1000.0, false);
     }
 }
 
@@ -160,11 +156,7 @@ fn main() -> Result<()> {
             channels,
             buffer_frames,
         )?,
-        _ => {
-            return Err(Error::Other(
-                "Unsupported sample format".to_string(),
-            ))
-        }
+        _ => return Err(Error::Other("Unsupported sample format".to_string())),
     };
 
     stream
@@ -344,7 +336,7 @@ where
                 if let Err(e) = plugin.process(
                     &[&input.0, &input.1],
                     &mut [&mut left_out, &mut right_out],
-                    buffer_frames
+                    buffer_frames,
                 ) {
                     eprintln!("Error processing audio: {}", e);
                     return;

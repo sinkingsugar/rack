@@ -496,7 +496,26 @@ extern "C" {
         events: *const RackVST3MidiEvent,
         event_count: u32,
     ) -> c_int;
+
+    // ============================================================================
+    // GUI API (Windows only at runtime, declared on all platforms)
+    // ============================================================================
+
+    pub fn rack_vst3_gui_has_editor(plugin: *mut RackVST3Plugin) -> c_int;
+    pub fn rack_vst3_gui_create(plugin: *mut RackVST3Plugin) -> *mut RackVST3Gui;
+    pub fn rack_vst3_gui_destroy(gui: *mut RackVST3Gui);
+    pub fn rack_vst3_gui_get_size(gui: *mut RackVST3Gui, width: *mut i32, height: *mut i32)
+        -> c_int;
+    pub fn rack_vst3_gui_show_window(gui: *mut RackVST3Gui, title: *const c_char) -> c_int;
+    pub fn rack_vst3_gui_hide_window(gui: *mut RackVST3Gui) -> c_int;
+    pub fn rack_vst3_gui_set_close_callback(
+        gui: *mut RackVST3Gui,
+        callback: RackVST3GuiCloseCallback,
+        user_data: *mut std::ffi::c_void,
+    );
 }
+
+pub type RackVST3GuiCloseCallback = extern "C" fn(user_data: *mut std::ffi::c_void);
 
 // MIDI event struct (matches C layout exactly)
 #[repr(C)]

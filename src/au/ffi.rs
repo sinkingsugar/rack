@@ -291,11 +291,8 @@ extern "C" {
     /// - `plugin` must be a valid pointer returned by `rack_au_plugin_new`
     /// - `index` must be less than parameter count
     /// - `value` should be in range 0.0-1.0 (values outside may be clamped)
-    pub fn rack_au_plugin_set_parameter(
-        plugin: *mut RackAUPlugin,
-        index: u32,
-        value: f32,
-    ) -> c_int;
+    pub fn rack_au_plugin_set_parameter(plugin: *mut RackAUPlugin, index: u32, value: f32)
+        -> c_int;
 
     /// Get parameter info (name, min, max, default, unit)
     ///
@@ -507,7 +504,8 @@ pub struct RackAUMidiEvent {
 /// - `user_data`: User-provided data passed to `rack_au_gui_create_async`
 /// - `gui`: Created GUI handle, or NULL on error
 /// - `error_code`: RACK_AU_OK on success, negative error code on failure
-pub type RackAUGuiCallback = extern "C" fn(user_data: *mut std::ffi::c_void, gui: *mut RackAUGui, error_code: c_int);
+pub type RackAUGuiCallback =
+    extern "C" fn(user_data: *mut std::ffi::c_void, gui: *mut RackAUGui, error_code: c_int);
 
 extern "C" {
     // ============================================================================
@@ -573,11 +571,7 @@ extern "C" {
     /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
     /// - `width` and `height` must be valid pointers to f32
     /// - Can be called from any thread
-    pub fn rack_au_gui_get_size(
-        gui: *mut RackAUGui,
-        width: *mut f32,
-        height: *mut f32,
-    ) -> c_int;
+    pub fn rack_au_gui_get_size(gui: *mut RackAUGui, width: *mut f32, height: *mut f32) -> c_int;
 
     /// Create and show window with GUI
     ///
@@ -593,10 +587,7 @@ extern "C" {
     /// - `gui` must be a valid pointer returned via `rack_au_gui_create_async` callback
     /// - `title` can be NULL for default title, or must point to null-terminated C string
     /// - Must be called from main thread
-    pub fn rack_au_gui_show_window(
-        gui: *mut RackAUGui,
-        title: *const c_char,
-    ) -> c_int;
+    pub fn rack_au_gui_show_window(gui: *mut RackAUGui, title: *const c_char) -> c_int;
 
     /// Hide window (without destroying GUI)
     ///

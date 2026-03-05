@@ -238,7 +238,9 @@ mod tests {
         assert!(
             variance < 0.2,
             "Scans should be stable: found {} then {} plugins ({}% variance)",
-            count1, count2, variance * 100.0
+            count1,
+            count2,
+            variance * 100.0
         );
     }
 
@@ -250,11 +252,20 @@ mod tests {
         if let Some(plugin) = plugins.first() {
             // Verify all fields are populated
             assert!(!plugin.name.is_empty(), "Plugin name should not be empty");
-            assert!(!plugin.manufacturer.is_empty(), "Manufacturer should not be empty");
-            assert!(!plugin.unique_id.is_empty(), "Unique ID should not be empty");
+            assert!(
+                !plugin.manufacturer.is_empty(),
+                "Manufacturer should not be empty"
+            );
+            assert!(
+                !plugin.unique_id.is_empty(),
+                "Unique ID should not be empty"
+            );
             // Version can be 0, so we don't assert it
             // path may be "<system>" for system plugins, so we just check it's not empty
-            assert!(plugin.path.as_os_str().len() > 0, "Path should not be empty");
+            assert!(
+                plugin.path.as_os_str().len() > 0,
+                "Path should not be empty"
+            );
         }
     }
 

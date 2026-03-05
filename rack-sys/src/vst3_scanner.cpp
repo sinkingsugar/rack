@@ -14,6 +14,9 @@
     #include <dirent.h>
     #include <sys/stat.h>
 #elif defined(_WIN32)
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
     #include <windows.h>
     #include <shlobj.h>
 #else

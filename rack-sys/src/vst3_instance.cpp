@@ -1214,3 +1214,12 @@ int rack_vst3_plugin_send_midi(
 
     return RACK_VST3_OK;
 }
+
+// ============================================================================
+// Internal accessor for GUI module
+// ============================================================================
+
+extern "C" Steinberg::Vst::IEditController* rack_vst3_plugin_get_controller(RackVST3Plugin* plugin) {
+    if (!plugin || !plugin->initialized) return nullptr;
+    return plugin->controller.get();
+}

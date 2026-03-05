@@ -29,9 +29,7 @@ fn main() -> Result<()> {
     println!("Found {} plugin(s)\n", plugins.len());
 
     // Find first effect plugin (effects typically have parameters)
-    let effect = plugins
-        .iter()
-        .find(|p| p.plugin_type == PluginType::Effect);
+    let effect = plugins.iter().find(|p| p.plugin_type == PluginType::Effect);
 
     if let Some(info) = effect {
         println!("Loading plugin:");
@@ -74,9 +72,11 @@ fn main() -> Result<()> {
             println!();
             println!("    Range: {:.2} - {:.2}", param.min, param.max);
             println!("    Default: {:.2}", param.default);
-            println!("    Current: {:.2} (normalized: {:.4})",
-                     denormalize(value, param.min, param.max),
-                     value);
+            println!(
+                "    Current: {:.2} (normalized: {:.4})",
+                denormalize(value, param.min, param.max),
+                value
+            );
             println!();
         }
         println!("{:-<80}", "");
@@ -92,7 +92,10 @@ fn main() -> Result<()> {
             // Get original value
             let original_value = plugin.get_parameter(0)?;
             println!("  Original value: {:.4} (normalized)", original_value);
-            println!("  Actual value: {:.2}", denormalize(original_value, param.min, param.max));
+            println!(
+                "  Actual value: {:.2}",
+                denormalize(original_value, param.min, param.max)
+            );
             println!();
 
             // Set to different values
@@ -103,8 +106,10 @@ fn main() -> Result<()> {
                 let actual = plugin.get_parameter(0)?;
                 let denorm = denormalize(actual, param.min, param.max);
 
-                println!("    Set to {:.2} → Read back: {:.4} (actual: {:.2})",
-                         normalized_value, actual, denorm);
+                println!(
+                    "    Set to {:.2} → Read back: {:.4} (actual: {:.2})",
+                    normalized_value, actual, denorm
+                );
             }
             println!();
 

@@ -11,11 +11,15 @@ use super::ffi;
 pub(crate) fn map_error(code: i32) -> Error {
     match code {
         ffi::RACK_VST3_ERROR_GENERIC => Error::Other("Generic VST3 error".to_string()),
-        ffi::RACK_VST3_ERROR_NOT_FOUND => Error::PluginNotFound("VST3 plugin not found".to_string()),
+        ffi::RACK_VST3_ERROR_NOT_FOUND => {
+            Error::PluginNotFound("VST3 plugin not found".to_string())
+        }
         ffi::RACK_VST3_ERROR_INVALID_PARAM => Error::Other("Invalid parameter".to_string()),
         ffi::RACK_VST3_ERROR_NOT_INITIALIZED => Error::NotInitialized,
         ffi::RACK_VST3_ERROR_LOAD_FAILED => Error::Other("Failed to load VST3 plugin".to_string()),
-        ffi::RACK_VST3_ERROR_NOT_SUPPORTED => Error::Other("Feature not supported by this plugin".to_string()),
+        ffi::RACK_VST3_ERROR_NOT_SUPPORTED => {
+            Error::Other("Feature not supported by this plugin".to_string())
+        }
         _ => Error::Other(format!("Unknown VST3 error code: {}", code)),
     }
 }

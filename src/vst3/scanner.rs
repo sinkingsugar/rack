@@ -88,7 +88,8 @@ impl Vst3Scanner {
     ///
     /// Returns an error if the path is invalid or cannot be added
     pub fn add_path(&mut self, path: &Path) -> Result<()> {
-        let path_str = path.to_str()
+        let path_str = path
+            .to_str()
             .ok_or_else(|| Error::Other("Path contains invalid UTF-8".to_string()))?;
 
         let path_cstr = CString::new(path_str)
@@ -292,9 +293,18 @@ mod tests {
         if let Some(plugin) = plugins.first() {
             // Verify all fields are populated
             assert!(!plugin.name.is_empty(), "Plugin name should not be empty");
-            assert!(!plugin.manufacturer.is_empty(), "Manufacturer should not be empty");
-            assert!(!plugin.unique_id.is_empty(), "Unique ID should not be empty");
-            assert!(plugin.path.as_os_str().len() > 0, "Path should not be empty");
+            assert!(
+                !plugin.manufacturer.is_empty(),
+                "Manufacturer should not be empty"
+            );
+            assert!(
+                !plugin.unique_id.is_empty(),
+                "Unique ID should not be empty"
+            );
+            assert!(
+                plugin.path.as_os_str().len() > 0,
+                "Path should not be empty"
+            );
         }
     }
 

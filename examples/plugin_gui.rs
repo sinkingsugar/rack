@@ -40,11 +40,7 @@ type CFRunLoopMode = *const std::ffi::c_void;
 /// Process macOS main event loop for a short duration
 fn process_main_event_loop(duration_ms: u64) {
     unsafe {
-        CFRunLoopRunInMode(
-            kCFRunLoopDefaultMode,
-            duration_ms as f64 / 1000.0,
-            false,
-        );
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, duration_ms as f64 / 1000.0, false);
     }
 }
 
@@ -62,7 +58,7 @@ fn run_event_loop() {
             CFRunLoopRunInMode(
                 kCFRunLoopDefaultMode,
                 1.0,
-                true,  // Return after source handled
+                true, // Return after source handled
             );
         }
 
@@ -94,14 +90,12 @@ fn main() -> Result<()> {
     // Avoid AUBandpass and other Apple effects that have buggy generic UIs
     let plugin_info = plugins
         .iter()
-        .find(|p| {
-            p.plugin_type == PluginType::Instrument
-        })
+        .find(|p| p.plugin_type == PluginType::Instrument)
         .or_else(|| {
             // If no instrument, try to find an effect that's NOT AUBandpass
-            plugins.iter().find(|p| {
-                p.plugin_type == PluginType::Effect && !p.name.contains("Bandpass")
-            })
+            plugins
+                .iter()
+                .find(|p| p.plugin_type == PluginType::Effect && !p.name.contains("Bandpass"))
         })
         .or_else(|| plugins.first());
 

@@ -396,7 +396,11 @@ mod tests {
         let event = MidiEvent::note_on(60, 100, 0, 0);
         assert_eq!(event.sample_offset, 0);
         match event.kind {
-            MidiEventKind::NoteOn { note, velocity, channel } => {
+            MidiEventKind::NoteOn {
+                note,
+                velocity,
+                channel,
+            } => {
                 assert_eq!(note, 60);
                 assert_eq!(velocity, 100);
                 assert_eq!(channel, 0);
@@ -410,7 +414,11 @@ mod tests {
         let event = MidiEvent::note_off(60, 64, 0, 100);
         assert_eq!(event.sample_offset, 100);
         match event.kind {
-            MidiEventKind::NoteOff { note, velocity, channel } => {
+            MidiEventKind::NoteOff {
+                note,
+                velocity,
+                channel,
+            } => {
                 assert_eq!(note, 60);
                 assert_eq!(velocity, 64);
                 assert_eq!(channel, 0);
@@ -423,7 +431,11 @@ mod tests {
     fn test_control_change_creation() {
         let event = MidiEvent::control_change(1, 64, 0, 0);
         match event.kind {
-            MidiEventKind::ControlChange { controller, value, channel } => {
+            MidiEventKind::ControlChange {
+                controller,
+                value,
+                channel,
+            } => {
                 assert_eq!(controller, 1);
                 assert_eq!(value, 64);
                 assert_eq!(channel, 0);
@@ -449,10 +461,14 @@ mod tests {
         // Test that values are clamped to valid MIDI ranges
         let event = MidiEvent::note_on(200, 200, 20, 0);
         match event.kind {
-            MidiEventKind::NoteOn { note, velocity, channel } => {
-                assert_eq!(note, 127);  // Clamped from 200
-                assert_eq!(velocity, 127);  // Clamped from 200
-                assert_eq!(channel, 15);  // Clamped from 20
+            MidiEventKind::NoteOn {
+                note,
+                velocity,
+                channel,
+            } => {
+                assert_eq!(note, 127); // Clamped from 200
+                assert_eq!(velocity, 127); // Clamped from 200
+                assert_eq!(channel, 15); // Clamped from 20
             }
             _ => panic!("Expected NoteOn event"),
         }
