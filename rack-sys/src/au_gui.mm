@@ -4,6 +4,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreFoundation/CoreFoundation.h>
 #include <cstring>
+#include <memory>
 #include <dispatch/dispatch.h>
 
 // GUI implementation structure
@@ -16,6 +17,12 @@ struct RackAUGui {
     bool owns_view_controller;         // Track ownership for cleanup
     bool owns_view;
     char error_message[256];
+    // Shared with blocks that show/hide queue on the main queue. Those blocks can
+    // outlive this struct (rack_au_gui_destroy on the main thread deletes it right
+    // away), so they check this flag before touching the struct. The bool is only
+    // read and written on the main thread; the shared_ptr itself may be copied from
+    // any thread (its refcount is atomic).
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
 };
 
 // Helper class for generic UI slider callbacks
@@ -467,6 +474,8 @@ void rack_au_gui_destroy(RackAUGui* gui) {
                 gui->slider_targets = nil;  // ARC will handle cleanup
             }
 
+            // Any show/hide block still queued on the main queue must now skip gui.
+            *gui->alive = false;
             delete gui;
         }
     };
@@ -530,7 +539,13 @@ int rack_au_gui_show_window(RackAUGui* gui, const char* title) {
         windowTitle = @"AudioUnit GUI";
     }
 
+    std::shared_ptr<bool> alive = gui->alive;
     dispatch_async(dispatch_get_main_queue(), ^{
+        // The GUI may have been destroyed on the main thread since this was queued.
+        // (An off-main destroy dispatch_syncs behind this block, so it can't overtake it.)
+        if (!*alive) {
+            return;
+        }
         @autoreleasepool {
             // Ensure NSApp is initialized (required for windows to appear)
             // This is safe to call multiple times
@@ -571,7 +586,13 @@ int rack_au_gui_hide_window(RackAUGui* gui) {
         return RACK_AU_ERROR_INVALID_PARAM;
     }
 
+    std::shared_ptr<bool> alive = gui->alive;
     dispatch_async(dispatch_get_main_queue(), ^{
+        // The GUI may have been destroyed on the main thread since this was queued.
+        // (An off-main destroy dispatch_syncs behind this block, so it can't overtake it.)
+        if (!*alive) {
+            return;
+        }
         if (gui->window != nil) {
             [gui->window orderOut:nil];
         }
