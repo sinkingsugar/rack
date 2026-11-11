@@ -551,8 +551,9 @@ int rack_au_gui_show_window(RackAUGui* gui, const char* title) {
                                                               defer:NO];
                 // NSWindow defaults to releasedWhenClosed = YES, which makes -close
                 // release the window. Under ARC we already own it via gui->window,
-                // so that extra release over-releases it and rack_au_gui_destroy
-                // (or the user clicking the close button) crashes with SIGSEGV.
+                // so that extra release over-releases it: rack_au_gui_destroy crashes
+                // with SIGSEGV, and a click on the close button leaves gui->window
+                // dangling for the next show/hide/destroy.
                 [gui->window setReleasedWhenClosed:NO];
 
                 [gui->window setContentView:gui->view];
