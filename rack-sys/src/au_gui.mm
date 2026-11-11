@@ -549,6 +549,11 @@ int rack_au_gui_show_window(RackAUGui* gui, const char* title) {
                                                                    NSWindowStyleMaskMiniaturizable)
                                                             backing:NSBackingStoreBuffered
                                                               defer:NO];
+                // NSWindow defaults to releasedWhenClosed = YES, which makes -close
+                // release the window. Under ARC we already own it via gui->window,
+                // so that extra release over-releases it and rack_au_gui_destroy
+                // (or the user clicking the close button) crashes with SIGSEGV.
+                [gui->window setReleasedWhenClosed:NO];
 
                 [gui->window setContentView:gui->view];
                 [gui->window setTitle:windowTitle];
